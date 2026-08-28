@@ -5,11 +5,19 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run --passWithNoTests --exclude \"**/*.compile-test.ts\""
   },
-  "dependencies": { "@assay/core": "workspace:*", "zod": "^3.23.8" }
+  "dependencies": {
+    "@assay/core": "workspace:*",
+    "zod": "^3.23.8"
+  }
 }

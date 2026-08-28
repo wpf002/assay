@@ -1,0 +1,10 @@
+{
+  "collectedAt": "2026-08-28T00:00:00.000Z",
+  "source": "aws kms list-keys + describe-key, exported by the customer",
+  "keys": [
+    { "id": "arn:aws:kms:us-east-1:1:key/payments-dek", "provider": "aws-kms", "region": "us-east-1", "keySpec": "SYMMETRIC_DEFAULT", "usage": "ENCRYPT_DECRYPT", "rotationEnabled": true },
+    { "id": "arn:aws:kms:us-east-1:1:key/doc-signing", "provider": "aws-kms", "region": "us-east-1", "keySpec": "RSA_4096", "usage": "SIGN_VERIFY", "hsmBacked": true },
+    { "id": "arn:aws:kms:us-east-1:1:key/partner-wrap", "provider": "aws-kms", "region": "us-east-1", "keySpec": "RSA_2048", "usage": "ENCRYPT_DECRYPT" },
+    { "id": "projects/p/locations/eu/keyRings/r/cryptoKeys/api/cryptoKeyVersions/3", "provider": "gcp-kms", "keySpec": "EC_SIGN_P384_SHA384", "usage": "SIGN_VERIFY", "hsmBacked": true }
+  ]
+}

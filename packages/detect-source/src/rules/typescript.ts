@@ -5,7 +5,7 @@ import {
   joseAlgorithm,
   normalizeCurve,
   signatureFromName,
-} from '../algorithms.js';
+} from '@assay/core';
 import { DUAL_USE_NOTE, arg, boundTo, detection, num, prop, str } from './helpers.js';
 
 const NODE_CRYPTO = ['node:crypto', 'crypto'] as const;

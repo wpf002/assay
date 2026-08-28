@@ -90,6 +90,16 @@ Active network probing runs only inside a signed `ScopeGrant` naming the targets
 
 Repo, artifact and cloud-KMS scanning of your own estate needs no grant. Touching a host does.
 
+The gate is enforced by the type system, not by a check someone can forget to call. `probeTls` and `probeSsh` accept only an `AuthorizedTarget`, whose brand is not exported; the only way to construct one is `authorize(verifiedGrant, host, port, now)`, which throws unless a verified, in-window grant covers that exact host and port. An out-of-scope probe does not compile.
+
+```bash
+pnpm assay scope keygen --out-dir ./grants
+pnpm assay scope sign --key ./grants/assay-scope.key.pem \
+  --issued-by security@example.com --targets '*.example.com,10.0.0.0/24' \
+  --ports 443 --not-after 2026-12-31T00:00:00Z --out ./grants/q3.json
+pnpm assay probe api.example.com:443 --grant ./grants/q3.json --pubkey ./grants/assay-scope.pub.pem
+```
+
 ---
 
 ## Architecture
@@ -102,8 +112,9 @@ packages/
   scope/           signed authorization grants for network detectors
   detect-source/   tree-sitter AST + config parsing (nginx, openssl.cnf, java.security)
   detect-deps/     manifest -> known crypto capability surface
-  detect-network/  TLS/SSH capability enumeration. scope-gated.
-  detect-pki/      X.509 and SSH host key inventory, lifetime vs migration window
+  detect-network/  TLS/SSH capability enumeration. scope-gated at the type level.
+  detect-pki/      X.509 inventory, lifetime vs migration window
+  detect-kms/      cloud KMS / HSM key inventory. metadata only, never key material.
   correlate/       joins modalities into Asset -> Occurrence edges, resolves conflicts
 apps/
   api/             Fastify + Prisma + Postgres
@@ -159,6 +170,8 @@ Discovery is table stakes and several of these do it competently. The gap Assay 
 
 ## Status
 
-Phases 0 and 1 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
+Phases 0, 1 and 2 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
 
-Phase 1's exit gate was a kill condition, and it passed: two disjoint hand-verified samples across django, Ghost and n8n scored 96.7% and 100% precision at `CONFIRMED`, and 834k LOC of n8n reduced to eleven work items. Details, including what the run does *not* establish, are in [VALIDATION.md](VALIDATION.md). Next is Phase 2 — see [ROADMAP.md](ROADMAP.md).
+Phase 1's exit gate was a kill condition, and it passed: two disjoint hand-verified samples across django, Ghost and n8n scored 96.7% and 100% precision at `CONFIRMED`, and 834k LOC of n8n reduced to eleven work items. Details, including what the run does *not* establish, are in [VALIDATION.md](VALIDATION.md). Phase 2 added the scope gate, certificate inventory with a lifetime-vs-deadline check, TLS/SSH capability enumeration, and cloud key-store classification. Its exit gate — that an out-of-scope probe fails at the type level rather than at runtime — is asserted by a compile-time test that runs under `tsc` in CI.
+
+Next is Phase 3, reachability and correlation — see [ROADMAP.md](ROADMAP.md).

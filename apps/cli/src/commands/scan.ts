@@ -13,6 +13,8 @@ import {
 import { assemble } from '@assay/correlate';
 import { scanSource } from '@assay/detect-source';
 import { scanDependencies } from '@assay/detect-deps';
+import { scanCertificates } from '@assay/detect-pki';
+import { importInventory, kmsFindings } from '@assay/detect-kms';
 import { decimalYear, loadPack } from '@assay/policy';
 
 export interface ScanOptions {
@@ -25,6 +27,8 @@ export interface ScanOptions {
   readonly includeSuspected?: boolean;
   readonly json?: boolean;
   readonly now?: string;
+  /** Normalized key-store inventory exported by the customer. See @assay/detect-kms. */
+  readonly keyInventory?: string;
 }
 
 export async function runScan(path: string, options: ScanOptions): Promise<void> {
@@ -34,12 +38,20 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
   const now = options.now ? new Date(options.now) : new Date();
   const collectedAt = now.toISOString();
 
-  const [source, deps] = await Promise.all([
+  const [source, deps, pki] = await Promise.all([
     scanSource({ root, systemId, collectedAt }),
     scanDependencies({ root, systemId, collectedAt, includeDev: options.includeDev === true }),
+    scanCertificates({ root, systemId, collectedAt }),
   ]);
 
-  const findings: Finding[] = [...source.findings, ...deps.findings];
+  const findings: Finding[] = [...source.findings, ...deps.findings, ...pki.findings];
+  let kmsKeys = 0;
+  if (options.keyInventory !== undefined) {
+    const inventory = await importInventory(options.keyInventory);
+    const { findings: kms } = kmsFindings(inventory, { systemId, collectedAt });
+    findings.push(...kms);
+    kmsKeys = inventory.keys.length;
+  }
   const { occurrences, assets } = assemble(findings);
 
   const secrecyYears = Number(options.secrecyYears);
@@ -74,6 +86,8 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
     pack: `${pack.packId}@${pack.packVersion}`,
     filesScanned: source.filesScanned,
     manifests: deps.manifests.length,
+    certificates: pki.certificates.length,
+    kmsKeys,
     uncatalogued: deps.uncatalogued,
     occurrences,
     assets,
@@ -88,6 +102,8 @@ interface ReportInput {
   readonly pack: string;
   readonly filesScanned: number;
   readonly manifests: number;
+  readonly certificates: number;
+  readonly kmsKeys: number;
   readonly uncatalogued: readonly string[];
   readonly occurrences: readonly Occurrence[];
   readonly assets: readonly CryptoAsset[];
@@ -104,8 +120,10 @@ function report(r: ReportInput): void {
   line();
   line(`assay  ${r.systemId}`);
   line(
-    `  ${r.filesScanned} file(s), ${r.manifests} manifest(s) -> ` +
-      `${r.assets.length} asset(s), ${r.occurrences.length} occurrence(s)`,
+    `  ${r.filesScanned} file(s), ${r.manifests} manifest(s), ` +
+      `${r.certificates} certificate(s)` +
+      (r.kmsKeys > 0 ? `, ${r.kmsKeys} managed key(s)` : '') +
+      ` -> ${r.assets.length} asset(s), ${r.occurrences.length} occurrence(s)`,
   );
   line(`  policy ${r.pack}`);
   line();

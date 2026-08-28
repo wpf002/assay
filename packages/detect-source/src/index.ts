@@ -8,7 +8,7 @@ import { configKindFor, parseConfig } from './config/index.js';
 import type { Detection } from './types.js';
 
 export * from './types.js';
-export * from './algorithms.js';
+
 export { languageFor, parseSource } from './parsers/index.js';
 export { RULES, ruleIndex, TYPESCRIPT_RULES, PYTHON_RULES } from './rules/index.js';
 export { configKindFor, parseConfig } from './config/index.js';

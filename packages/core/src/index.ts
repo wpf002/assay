@@ -3,6 +3,7 @@ export * from './types/factor.js';
 export * from './types/crypto-asset.js';
 export * from './types/finding.js';
 export * from './hash/index.js';
+export * from './naming/index.js';
 export * from './asset/index.js';
 export * from './confidence/index.js';
 export * from './mosca/index.js';

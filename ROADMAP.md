@@ -122,7 +122,7 @@ Assay records that a key exists, its algorithm, and its size. It never reads, st
 |---|---|---|
 | 0 | Substrate + core engine | done |
 | 1 | Source + dependency, TS/Python | **the whole bet** — done, gate passed |
-| 2 | Cloud KMS/PKI, then network, scope gate | adds the independent modalities I1 needs |
+| 2 | Scope gate, KMS, PKI, network | done — adds the independent modalities I1 needs |
 | 3 | Correlation + reachability | where it becomes worth money |
 | 4 | API, persistence, web | makes the derivation clickable |
 | 5 | Binary analysis | last on purpose |
@@ -168,6 +168,8 @@ If precision at `CONFIRMED` can't clear 90% after two rounds of rule tuning, the
 
 ## 6. Phase 2 — Cloud KMS, PKI, and network
 
+**Status: complete.** The scope gate shipped before any probing code existed, as required.
+
 **Ship the scope gate before any probing code exists.**
 
 Reordered from the original plan: cloud KMS/HSM/KMIP enumeration lands *before* active network probing. It is higher confidence (the provider names the key spec), lower effort, needs no grant machinery beyond IAM, and it is the single largest coverage gap against the commercial field.
@@ -181,7 +183,9 @@ Reordered from the original plan: cloud KMS/HSM/KMIP enumeration lands *before* 
 - SSH host key and KEX algorithm enumeration
 - Passive PCAP ingest for environments where active probing is off the table
 
-**Exit gate:** an out-of-scope probe fails at the type level, not at runtime. Grant verification carries adversarial tests — expired grant, wrong signature, target outside CIDR, clock skew.
+**Exit gate: passed.** `AuthorizedTarget` and `VerifiedGrant` are branded with unexported symbols, so the only way to obtain either is through `authorize()` / `verifyGrant()`. `packages/scope/test/types.compile-test.ts` asserts this with `@ts-expect-error` and runs under `tsc` in CI: if the brands were ever removed, the *typecheck* fails, not a test. 27 adversarial runtime tests cover expired and not-yet-valid grants, wrong key, targets/ports/expiry widened after signing, truncated and non-base64 signatures, a public key smuggled into the grant body, inverted windows, capped clock skew, glob escape across dots, non-canonical IPv4 octets, and IPv6 prefixes that are not byte-aligned.
+
+**What shipped, and one honest gap.** Cloud KMS ships as the normalized `KeyRecord` model plus pure adapters from each provider's metadata response (`fromAwsKms`, `fromAzureKeyVault`, `fromGcpKms`) and `importInventory` for a customer-supplied export. The SDK calls that would feed those adapters live credentials are *not* implemented: they cannot be verified here, and an unverifiable integration is worse than an absent one. The classification layer — the part that is easy to get subtly wrong, and where a real bug was caught (Azure states RSA size only as an unpadded base64url modulus, and the padded-length formula reported 2048-bit keys as 2052) — is implemented and tested. The import path is also the only path that ever exists in an air-gapped estate.
 
 ---
 

@@ -6,7 +6,7 @@ import {
   normalizeCurve,
   sshAlgorithm,
   tlsCipherSuite,
-} from '../algorithms.js';
+} from '@assay/core';
 
 /**
  * Configuration parsing.

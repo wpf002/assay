@@ -1,7 +1,14 @@
-import type { Primitive, Purpose } from '@assay/core';
+import type { Primitive, Purpose } from '../types/crypto-asset.js';
 
 /**
- * Algorithm-name normalization, shared by AST rules and config parsers.
+ * Algorithm-name normalization.
+ *
+ * Lives in core because three modalities read the same names and must agree.
+ * `sshd_config` says `ecdh-sha2-nistp256`; an SSH handshake says the same
+ * string on the wire; a certificate says `P-256`. If the config parser and the
+ * network prober normalized those differently they would produce two assets
+ * with different content hashes, and the noisy-OR across independent modality
+ * groups - the entire point of I1 - would silently never fire.
  *
  * Every table here is a place a false positive can be born, so each entry maps
  * a name a developer actually writes to a primitive plus the parameters that

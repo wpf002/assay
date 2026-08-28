@@ -18,6 +18,10 @@
     "commander": "^12.1.0",
     "@assay/detect-source": "workspace:*",
     "@assay/detect-deps": "workspace:*",
-    "@assay/correlate": "workspace:*"
+    "@assay/correlate": "workspace:*",
+    "@assay/scope": "workspace:*",
+    "@assay/detect-network": "workspace:*",
+    "@assay/detect-pki": "workspace:*",
+    "@assay/detect-kms": "workspace:*"
   }
 }

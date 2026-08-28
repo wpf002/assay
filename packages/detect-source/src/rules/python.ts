@@ -1,5 +1,5 @@
 import type { Detection, Rule } from '../types.js';
-import { cipherFromName, hashFromName, joseAlgorithm, normalizeCurve } from '../algorithms.js';
+import { cipherFromName, hashFromName, joseAlgorithm, normalizeCurve } from '@assay/core';
 import { DUAL_USE_NOTE, arg, boundTo, detection, num, str } from './helpers.js';
 
 const HAZMAT = ['cryptography.hazmat.primitives', 'cryptography'] as const;
