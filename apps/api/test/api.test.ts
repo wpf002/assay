@@ -360,3 +360,44 @@ describe('coverage: the services that call you and have no CBOM', () => {
     await bare.close();
   });
 });
+
+describe('the drill-down carries structured terms, not label strings', () => {
+  it('returns the confidence ceilings as data the UI can put into words', async () => {
+    const list = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}` });
+    const first = list.json<{ confidentiality: { occurrenceId: string }[] }>().confidentiality[0];
+    const r = await app.inject({
+      method: 'GET',
+      url: `/scans/${scanA}/occurrences/${first?.occurrenceId}?now=${T1}`,
+    });
+    const c = r.json<{
+      derivations: {
+        confidence: { value: number; groups: { contributing: string; ceiling: number }[] };
+        mosca: { x: number; y: number; crqc: { horizonYears: number } } | null;
+      };
+    }>().derivations;
+
+    // Parsing "group 0: SOURCE_CONFIG ceiling 0.9 (...)" back out of a label
+    // is how a UI ends up lying when a label changes.
+    expect(c.confidence.groups.length).toBeGreaterThan(0);
+    expect(c.confidence.groups[0]?.ceiling).toBeGreaterThan(0);
+    expect(c.mosca?.y).toBeGreaterThan(0);
+    expect(c.mosca?.crqc.horizonYears).toBeGreaterThan(0);
+  });
+
+  it('resolves an occurrence estate-wide, where there is no single scan to ask', async () => {
+    const estate = await app.inject({ method: 'GET', url: `/estate/worklists?now=${T2}` });
+    const first = estate.json<{ worklists: { confidentiality: { occurrenceId: string }[] } }>()
+      .worklists.confidentiality[0];
+    const r = await app.inject({
+      method: 'GET',
+      url: `/estate/occurrences/${first?.occurrenceId}?pack=eo-14412`,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json<{ evidence: unknown[] }>().evidence.length).toBeGreaterThan(0);
+  });
+
+  it('404s an occurrence that is in no current scan', async () => {
+    const r = await app.inject({ method: 'GET', url: '/estate/occurrences/nope' });
+    expect(r.statusCode).toBe(404);
+  });
+});

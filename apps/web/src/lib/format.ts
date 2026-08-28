@@ -145,3 +145,135 @@ export const ASSERTION: Readonly<Record<string, string>> = {
   OBSERVED: 'Observed',
   SUSPECTED: 'Suspected',
 };
+
+/* --------------------------------------------------------- plain explanations */
+
+/**
+ * Human names for the detection modalities, with what each is worth.
+ *
+ * The ceiling is the whole argument of this tool and it is meaningless as a
+ * bare decimal. "A string in a binary, worth at most 30%" says why four
+ * hundred of them still do not add up to a fact.
+ */
+export const MODALITY: Readonly<Record<string, string>> = {
+  PKI_CERTIFICATE: 'A parsed certificate',
+  NETWORK_ACTIVE: 'A completed handshake',
+  RUNTIME_HOOK: 'A running process, instrumented',
+  CLOUD_KMS_API: 'The key provider’s own answer',
+  SOURCE_AST: 'A call in the source, with its arguments read',
+  SOURCE_CONFIG: 'A configuration file',
+  BINARY_CONSTANT: 'An exact algorithm constant in a binary',
+  HOST_AGENT: 'An endpoint agent',
+  BINARY_SYMBOL: 'An imported symbol in a binary',
+  NETWORK_PASSIVE: 'Captured traffic',
+  ASSERTED: 'A vendor questionnaire',
+  DEPENDENCY: 'A dependency manifest',
+  BINARY_STRING: 'A matching string in a binary',
+};
+
+export interface MoscaTerms {
+  x: number;
+  y: number;
+  bindingConstraint: 'CRQC' | 'REGULATORY';
+  crqc: { horizonYears: number; slackYears: number };
+  regulatory: { deadlineYear: number; horizonYears: number; slackYears: number } | null;
+  controlClass: string;
+  track: string;
+  policy: { packId: string; crqcYear: number; authority: string | null };
+}
+
+/** Why each control class takes as long as it does, in a clause that reads. */
+const WHY_LONG: Readonly<Record<string, string>> = {
+  SELF: 'it is our code and our deployment',
+  VENDOR_UPGRADEABLE: 'we have to wait for a vendor release and then upgrade',
+  VENDOR_LOCKED: 'the vendor controls it and has published no post-quantum path',
+  HARDWARE: 'it is bound to a hardware replacement cycle, not to a code change',
+  PROTOCOL_BILATERAL: 'both ends of the protocol have to move together',
+};
+
+const short = (years: number): string => `${years} year${years === 1 ? '' : 's'}`;
+
+/** How much you are over or under, without a signed number in the prose. */
+const margin = (slack: number): string =>
+  slack < 0
+    ? `leaves you ${Math.abs(slack)} years short — you are already late.`
+    : `leaves ${slack} years to spare.`;
+
+/** The date, as an argument rather than as arithmetic. */
+export function whyThisDate(m: MoscaTerms): string[] {
+  const lines: string[] = [];
+  lines.push(
+    `Replacing this takes about ${short(m.y)}: ${WHY_LONG[m.controlClass] ?? 'of who controls it'}.`,
+  );
+
+  if (m.bindingConstraint === 'REGULATORY' && m.regulatory !== null) {
+    const deadline = `${Math.floor(m.regulatory.deadlineYear) - 1}-12-31`;
+    lines.push(
+      `The deadline is ${deadline}, ${m.regulatory.horizonYears} years away. Starting today ` +
+        margin(m.regulatory.slackYears),
+    );
+    lines.push(
+      m.crqc.slackYears > m.regulatory.slackYears
+        ? `On the physics alone you would have had ${m.crqc.slackYears} years. The regulation is what binds here, not the quantum computer.`
+        : 'The regulation and the physics point the same way here.',
+    );
+    return lines;
+  }
+
+  if (m.track === 'CONFIDENTIALITY') {
+    lines.push(
+      `Anything encrypted with it today has to stay secret for ${short(m.x)}, and this pack assumes a quantum computer by ${m.policy.crqcYear} — ${m.crqc.horizonYears} years away.`,
+    );
+    lines.push(
+      `${short(m.x)} of secrecy plus ${short(m.y)} of work against a ${m.crqc.horizonYears}-year horizon ` +
+        margin(m.crqc.slackYears),
+    );
+  } else {
+    lines.push(
+      `Signatures are not broken retroactively, so only the work counts: ${short(m.y)} against a ${m.crqc.horizonYears}-year horizon ` +
+        margin(m.crqc.slackYears),
+    );
+  }
+  return lines;
+}
+
+export interface ConfidenceGroup {
+  contributing: string;
+  ceiling: number;
+  tallies: { modality: string; count: number; ceiling: number }[];
+  suppressed: number;
+}
+
+/** How sure, and why more of the same evidence would not help. */
+export function whyWeBelieve(value: number, groups: readonly ConfidenceGroup[]): string[] {
+  if (groups.length === 0) return ['No evidence.'];
+  const pct = Math.round(value * 100);
+  const lines: string[] = [];
+
+  if (groups.length === 1) {
+    const g = groups[0] as ConfidenceGroup;
+    const total = g.tallies.reduce((n, t) => n + t.count, 0);
+    lines.push(
+      `${MODALITY[g.contributing] ?? g.contributing} is the strongest thing we have, and that kind of evidence is worth at most ${Math.round(g.ceiling * 100)}%. So: ${pct}%.`,
+    );
+    if (total > 1) {
+      lines.push(
+        `We found it ${total} times. That does not raise the number — repeating one kind of observation is still one observation.`,
+      );
+    }
+    return lines;
+  }
+
+  lines.push(
+    `${groups.length} independent kinds of evidence agree, which is why this reaches ${pct}%: ` +
+      groups.map((g) => (MODALITY[g.contributing] ?? g.contributing).toLowerCase()).join(', ') +
+      '.',
+  );
+  const suppressed = groups.reduce((n, g) => n + g.suppressed, 0);
+  if (suppressed > 0) {
+    lines.push(
+      `${suppressed} further observation${suppressed === 1 ? '' : 's'} of those same kinds were counted once each, not added up.`,
+    );
+  }
+  return lines;
+}

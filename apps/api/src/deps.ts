@@ -3,6 +3,8 @@
  * start depending on something that does I/O.
  */
 export {
+  computeConfidenceBreakdown,
+  MODALITY_CEILING,
   diffScans,
   explain,
   blockers,

@@ -9,6 +9,7 @@ import {
   buildServiceGraph,
   spansFromOtlp,
   traceRoots,
+  computeConfidenceBreakdown,
   diffScans,
   explain,
   blockers,
@@ -176,6 +177,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     const q = RankQuery.parse(request.query);
     const asset = scan.assets.find((a) => a.id === occurrence.assetId) ?? null;
     const ranked = rankScan(scan, q);
+    const pack = loadPack(q.pack);
     const row = [...ranked.confidentiality, ...ranked.authenticity, ...ranked.unreached, ...ranked.hints]
       .find((f) => f.occurrenceId === occurrence.id);
     const g = gate(occurrence);
@@ -192,6 +194,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
           tree: explain(occurrence.confidence, 'confidence'),
           depth: derivationDepth(occurrence.confidence),
           citations: citations(occurrence.confidence).length,
+          // Structured, so the UI can explain the ceilings in words instead of
+          // parsing them back out of a label string.
+          value: Number(occurrence.confidence.value),
+          groups: computeConfidenceBreakdown(occurrence.evidence).groups,
         },
         mosca:
           row === undefined
@@ -200,6 +206,18 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
                 tree: explain(row.mosca.factor, 'mosca'),
                 depth: derivationDepth(row.mosca.factor),
                 bindingConstraint: row.bindingConstraint,
+                x: row.mosca.x,
+                y: row.mosca.y,
+                crqc: row.mosca.crqc,
+                regulatory: row.mosca.regulatory,
+                controlClass: row.controlClass,
+                track: row.track,
+                policy: {
+                  packId: ranked.policyPackId,
+                  packVersion: ranked.policyPackVersion,
+                  crqcYear: pack.crqcYear,
+                  authority: pack.regulatoryAuthority,
+                },
               },
         reachability:
           occurrence.reachability === null
@@ -212,6 +230,29 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
               },
       },
     };
+  });
+
+  /**
+   * The same drill-down, addressed estate-wide.
+   *
+   * The estate view has no single scan to query - it is the newest scan of
+   * every system merged - so a row opened there had nowhere to send its
+   * request. Occurrence ids are stable content hashes, so the lookup is just
+   * "find it across the current estate".
+   */
+  app.get('/estate/occurrences/:occId', async (request, reply) => {
+    const { occId } = request.params as { occId: string };
+    const scans = await store.latestPerSystem();
+    const owner = scans.find((s) => s.occurrences.some((o) => o.id === occId));
+    if (owner === undefined) return reply.code(404).send({ error: 'no such occurrence in the estate' });
+    // Delegate to the per-scan handler so there is exactly one implementation
+    // of the derivation response.
+    const query = new URLSearchParams(request.query as Record<string, string>).toString();
+    const inner = await app.inject({
+      method: 'GET',
+      url: `/scans/${owner.id}/occurrences/${encodeURIComponent(occId)}${query === '' ? '' : `?${query}`}`,
+    });
+    return reply.code(inner.statusCode).send(inner.json());
   });
 
   app.get('/scans/:id/cbom', async (request, reply) => {

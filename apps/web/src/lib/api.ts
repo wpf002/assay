@@ -87,8 +87,31 @@ export interface Derivation {
   blockedBy: string[];
   evidence: { modality: string; locator: string; raw: string; collectedAt: string }[];
   derivations: {
-    confidence: { tree: ExplainNode; depth: number; citations: number };
-    mosca: { tree: ExplainNode; depth: number; bindingConstraint: string } | null;
+    confidence: {
+      tree: ExplainNode;
+      depth: number;
+      citations: number;
+      value: number;
+      groups: {
+        index: number;
+        contributing: string;
+        ceiling: number;
+        tallies: { modality: string; count: number; ceiling: number }[];
+        suppressed: number;
+      }[];
+    };
+    mosca: {
+      tree: ExplainNode;
+      depth: number;
+      bindingConstraint: 'CRQC' | 'REGULATORY';
+      x: number;
+      y: number;
+      crqc: { horizonYears: number; slackYears: number; late: boolean };
+      regulatory: { deadlineYear: number; horizonYears: number; slackYears: number; late: boolean } | null;
+      controlClass: string;
+      track: string;
+      policy: { packId: string; packVersion: string; crqcYear: number; authority: string | null };
+    } | null;
     reachability: {
       tree: ExplainNode;
       via: string;
@@ -141,8 +164,13 @@ export const getScans = (): Promise<ScanSummary[]> => get('/scans');
 export const getPacks = (): Promise<PolicyPack[]> => get('/policy-packs');
 export const getWorklists = (scanId: string, pack: string, secrecyYears: number): Promise<Worklists> =>
   get(`/scans/${scanId}/worklists?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`);
+export const ESTATE_SCAN = '__estate__';
+
 export const getDerivation = (scanId: string, occId: string, pack: string): Promise<Derivation> =>
-  get(`/scans/${scanId}/occurrences/${encodeURIComponent(occId)}?pack=${encodeURIComponent(pack)}`);
+  get(
+    `${scanId === ESTATE_SCAN ? '/estate' : `/scans/${scanId}`}/occurrences/` +
+      `${encodeURIComponent(occId)}?pack=${encodeURIComponent(pack)}`,
+  );
 export const getEstate = (pack: string, secrecyYears: number): Promise<EstateResult> =>
   get(`/estate/worklists?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`);
 export const getCoverage = (): Promise<Coverage> => get('/estate/coverage');

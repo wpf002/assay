@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getDerivation, type Derivation, type RankedFinding } from '@/lib/api';
 import {
   ASSERTION,
+  MODALITY,
   PURPOSE,
   WHERE,
   action,
@@ -9,6 +10,8 @@ import {
   assetLabel,
   driver,
   due,
+  whyThisDate,
+  whyWeBelieve,
 } from '@/lib/format';
 import { Timeline } from './Timeline';
 import { Tree } from './Tree';
@@ -157,8 +160,8 @@ function Detail({
     void load();
   }, [load]);
 
-  if (error !== null) return <div className="panel">could not load the derivation: {error}</div>;
-  if (data === null) return <div className="panel">loading the derivation…</div>;
+  if (error !== null) return <div className="panel">Could not load the evidence: {error}</div>;
+  if (data === null) return <div className="panel">Loading…</div>;
 
   const d = data.derivations;
   return (
@@ -172,51 +175,97 @@ function Detail({
 
       {d.mosca !== null && (
         <section>
-          <h3>Why this number</h3>
-          <Tree node={d.mosca.tree} />
+          <h3>Why this date</h3>
+          {whyThisDate(d.mosca).map((line) => (
+            <p className="prose" key={line}>
+              {line}
+            </p>
+          ))}
+          <p className="prose dim">
+            Deadline from {d.mosca.policy.packId}
+            {d.mosca.policy.authority === null ? '' : ` · ${d.mosca.policy.authority}`}
+          </p>
+          <details>
+            <summary>Show the arithmetic</summary>
+            <Tree node={d.mosca.tree} />
+          </details>
         </section>
       )}
 
       <section>
-        <h3>Why we believe it</h3>
-        <Tree node={d.confidence.tree} />
+        <h3>How sure we are</h3>
+        {whyWeBelieve(d.confidence.value, d.confidence.groups).map((line) => (
+          <p className="prose" key={line}>
+            {line}
+          </p>
+        ))}
         {data.downgradeReason !== null && (
-          <div className="caveat">
-            Not CONFIRMED: {data.downgradeReason}
+          <p className="prose warn">
+            Not confirmed: {data.downgradeReason}
             {data.blockedBy.length > 0 && ` — ${data.blockedBy.join('; ')}`}
-          </div>
+          </p>
         )}
+        {d.confidence.groups.length > 0 && (
+          <table className="sure">
+            <tbody>
+              {d.confidence.groups.flatMap((g) =>
+                g.tallies.map((t) => (
+                  <tr key={`${g.contributing}-${t.modality}`} className={t.modality === g.contributing ? 'counted' : 'ignored'}>
+                    <td>{MODALITY[t.modality] ?? t.modality}</td>
+                    <td className="num">{t.count === 1 ? 'once' : `${t.count} times`}</td>
+                    <td className="num">up to {Math.round(t.ceiling * 100)}%</td>
+                    <td>{t.modality === g.contributing ? 'counted' : 'already covered'}</td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        )}
+        <details>
+          <summary>Show the full derivation</summary>
+          <Tree node={d.confidence.tree} />
+        </details>
       </section>
 
       {d.reachability !== null && (
         <section>
-          <h3>Why it is exposed</h3>
-          <Tree node={d.reachability.tree} />
+          <h3>Where it runs</h3>
+          <p className="prose">
+            {d.reachability.path.length > 0
+              ? 'Traced from an entry point:'
+              : (WHERE[d.reachability.via] ?? d.reachability.via) +
+                (d.reachability.entryPoint === null ? '.' : ` — ${d.reachability.entryPoint}.`)}
+          </p>
           {d.reachability.path.length > 0 && (
-            <div className="caveat">
-              {d.reachability.path.map((p) => `${p.fullFilename}${p.line ? `:${p.line}` : ''}`).join('  →  ')}
-            </div>
+            <p className="prose path">
+              {d.reachability.path
+                .map((p) => `${p.fullFilename}${p.line === undefined ? '' : `:${p.line}`}`)
+                .join('  →  ')}
+            </p>
           )}
+          <details>
+            <summary>Show the full derivation</summary>
+            <Tree node={d.reachability.tree} />
+          </details>
         </section>
       )}
 
       <section>
-        <h3>Raw evidence ({data.evidence.length})</h3>
+        <h3>Where we found it · {data.evidence.length}</h3>
         <table className="evidence">
           <tbody>
             {data.evidence.slice(0, 40).map((e, i) => (
               <tr key={`${e.locator}-${i}`}>
-                <td className="mod">{e.modality}</td>
-                <td className="mod">{e.locator}</td>
-                <td>{e.raw.slice(0, 180)}</td>
+                <td className="mod">{MODALITY[e.modality] ?? e.modality}</td>
+                <td className="loc">{e.locator}</td>
               </tr>
             ))}
           </tbody>
         </table>
         {data.evidence.length > 40 && (
-          <div className="caveat">
-            {data.evidence.length - 40} further observations of the same work item, folded in.
-          </div>
+          <p className="prose dim">
+            and {data.evidence.length - 40} more places, all of them the same work item.
+          </p>
         )}
       </section>
     </div>

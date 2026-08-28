@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ESTATE_SCAN,
   getCoverage,
   getEstate,
   getRerank,
@@ -11,7 +12,7 @@ import {
 } from '@/lib/api';
 
 /** Sentinel for the estate view: every system at once, correlated by traces. */
-const ESTATE = '__estate__';
+const ESTATE = ESTATE_SCAN;
 import { Worklist } from './Worklist';
 
 /**
