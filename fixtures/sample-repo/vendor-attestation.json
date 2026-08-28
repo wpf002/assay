@@ -1,0 +1,42 @@
+{
+  "schema": "assay.attestation/v1",
+  "vendor": "Acme Systems",
+  "product": "PaymentSwitch",
+  "version": "9.2.1",
+  "systemId": "sample-repo",
+  "controlClass": "VENDOR_LOCKED",
+  "attestedBy": "security@acme.example",
+  "attestedAt": "2026-06-01T00:00:00.000Z",
+  "validUntil": "2027-06-01T00:00:00.000Z",
+  "reference": "MSA schedule 4, PQC readiness",
+  "claims": [
+    {
+      "primitive": "RSA",
+      "parameters": { "modulusLength": 2048 },
+      "purpose": "KEY_ESTABLISHMENT",
+      "component": "HSM channel",
+      "configurable": false
+    },
+    {
+      "primitive": "AES",
+      "parameters": { "keySize": 256, "mode": "GCM" },
+      "purpose": "DATA_ENCRYPTION",
+      "component": "at-rest encryption",
+      "configurable": true
+    },
+    {
+      "primitive": "SHA2",
+      "parameters": { "outputLength": 256 },
+      "purpose": "INTEGRITY",
+      "component": "message authentication",
+      "configurable": false
+    }
+  ],
+  "roadmap": {
+    "status": "committed",
+    "availableFrom": "2030-09-01T00:00:00.000Z",
+    "algorithms": ["ML-KEM", "ML-DSA"],
+    "requiresHardwareReplacement": true,
+    "notes": "PQC ships in 10.x; the HSM line must be replaced to get it."
+  }
+}

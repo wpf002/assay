@@ -57,6 +57,20 @@ export interface MoscaInput {
   /** Decimal year, supplied by the caller. Core reads no clock (I7). */
   readonly currentYear: number;
   readonly policy: MoscaPolicy;
+  /**
+   * Y, overridden by something the estate actually knows.
+   *
+   * The policy default is a class average: VENDOR_LOCKED means "four years,
+   * probably". When a vendor states a date - "PQ support in 2029Q2" - that is
+   * a better Y for this specific product, and it is the term the whole ranking
+   * turns on. It arrives with its own provenance, and an unverified vendor
+   * claim taints the ranking derivation accordingly.
+   */
+  readonly migrationYearsOverride?: {
+    readonly years: number;
+    readonly label: string;
+    readonly kind: Factor['kind'];
+  };
 }
 
 export interface ConstraintResult {
@@ -93,7 +107,8 @@ export function scoreMosca(input: MoscaInput): MoscaResult {
   // Authenticity is not retroactively breakable: a signature forgeable in 2033
   // is a 2033 problem. X collapses to zero rather than to the archive lifetime.
   const x = track === 'CONFIDENTIALITY' ? secrecyLifetimeYears : 0;
-  const y = policy.migrationYearsByControl[controlClass];
+  const override = input.migrationYearsOverride;
+  const y = override?.years ?? policy.migrationYearsByControl[controlClass];
 
   const zCrqc = round2(policy.crqcYear - currentYear);
   const crqc: ConstraintResult = {
@@ -125,11 +140,26 @@ export function scoreMosca(input: MoscaInput): MoscaResult {
       )
     : leaf('INFERENCE', `X secrecy lifetime (${track})`, x);
 
-  const yFactor = leaf(
-    'POLICY',
-    `Y migration years [${controlClass}] @ ${policy.packId}@${policy.packVersion}`,
-    y,
-  );
+  const yFactor =
+    override === undefined
+      ? leaf(
+          'POLICY',
+          `Y migration years [${controlClass}] @ ${policy.packId}@${policy.packVersion}`,
+          y,
+        )
+      : {
+          kind: override.kind,
+          label: `Y migration years [${controlClass}] overridden: ${override.label}`,
+          value: y,
+          weight: 1,
+          sources: [
+            leaf(
+              'POLICY',
+              `class default would have been ${policy.migrationYearsByControl[controlClass]} @ ${policy.packId}@${policy.packVersion}`,
+              policy.migrationYearsByControl[controlClass],
+            ),
+          ],
+        };
 
   const crqcFactor: Factor = {
     kind: 'INFERENCE',

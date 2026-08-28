@@ -63,6 +63,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@assay/attest':
+        specifier: workspace:*
+        version: link:../../packages/attest
       '@assay/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -121,6 +124,15 @@ importers:
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
+
+  packages/attest:
+    dependencies:
+      '@assay/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
 
   packages/core:
     dependencies:

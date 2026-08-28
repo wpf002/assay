@@ -127,7 +127,7 @@ Assay records that a key exists, its algorithm, and its size. It never reads, st
 | 4 | API, persistence, web | done — makes the derivation clickable |
 | 5 | Binary analysis | done — last on purpose |
 | 6 | Language expansion + CI | done — breadth after depth |
-| 7 | Vendor attestation | now a FAR compliance artifact, not an upsell |
+| 7 | Vendor attestation | done — now a FAR compliance artifact, not an upsell |
 
 ---
 
@@ -294,6 +294,16 @@ Ships as a composite GitHub Action (`.github/actions/assay-scan`), a `.pre-commi
 ---
 
 ## 11. Phase 7 — Vendor attestation
+
+**Status: complete.**
+
+**The date is the product, not the questionnaire.** A questionnaire response is ingested at the `ASSERTED` ceiling (0.40) and cannot confirm anything on its own — a vendor saying their product uses AES-256 is not an observation of AES-256. What is worth collecting is the roadmap date: a class average says `VENDOR_LOCKED` is "four years, probably", while a vendor saying *2030-09-01, and you must replace the HSM line to get it* yields **Y = 6.52 years**, which blows the 2031 deadline by two years. That is a procurement conversation with a number in it rather than a shrug, and the number carries its provenance — the vendor's date enters the Mosca derivation as an `ASSUMPTION` node, with the class default it replaced still shown beside it.
+
+`"evaluating"` is deliberately not treated as a commitment. It is a vendor declining to give a date, and ranking it as though one existed is exactly the optimism this tool exists to remove.
+
+**The reconciliation cell that pays for the exercise is `UNDISCLOSED`:** cryptography observed in a product whose attestation never mentions it. Not because the vendor lied, but because a CBOM assembled from vendor claims alone would have a hole exactly there. The four verdicts are `CORROBORATED`, `UNDISCLOSED`, `UNVERIFIED` (claimed and untested — which may simply be true) and `CONTRADICTED_ROADMAP` (the vendor claims post-quantum support is available and the wire still negotiates a Shor-broken key exchange).
+
+An attestation carries a mandatory `validUntil`, for the same reason a suppression does: a response with no expiry is a claim about a product that has shipped four releases since.
 
 `VENDOR_LOCKED` and `HARDWARE` are the classes that actually blow the timeline, and they're unresolvable by scanning.
 

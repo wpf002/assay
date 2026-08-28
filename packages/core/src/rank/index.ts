@@ -93,6 +93,14 @@ export interface RankOptions {
     a: CryptoAsset,
   ) => { readonly years: number; readonly assumed: boolean };
   readonly confirmThreshold?: number;
+  /**
+   * A better Y for a specific work item than the control-class average, e.g. a
+   * vendor's stated availability date. Returning undefined keeps the default.
+   */
+  readonly migrationYears?: (
+    o: Occurrence,
+    a: CryptoAsset,
+  ) => { readonly years: number; readonly label: string; readonly kind: Factor['kind'] } | undefined;
 }
 
 export function rank(
@@ -111,6 +119,7 @@ export function rank(
 
     const g = gate(o, opts.confirmThreshold);
     const secrecy = opts.secrecyLifetime(o, asset);
+    const override = opts.migrationYears?.(o, asset);
     const mosca = scoreMosca({
       purpose: asset.purpose,
       controlClass: o.controlClass,
@@ -118,6 +127,7 @@ export function rank(
       secrecyLifetimeAssumed: secrecy.assumed,
       currentYear: opts.currentYear,
       policy: opts.policy,
+      ...(override === undefined ? {} : { migrationYearsOverride: override }),
     });
 
     findings.push({

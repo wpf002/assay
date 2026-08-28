@@ -6,6 +6,7 @@ import { runProbe } from './commands/probe.js';
 import { keygen, sign, verify } from './commands/scope.js';
 import { runPush } from './commands/push.js';
 import { runCi } from './commands/ci.js';
+import { attestReconcile, attestTemplate } from './commands/attest.js';
 
 const program = new Command('assay').description(
   'Cryptographic bill of materials - discovery, inventory, migration ranking',
@@ -74,6 +75,32 @@ program
   .option('--now <iso>', 'override the current time, for reproducible runs')
   .action(async (path: string, options) => {
     await runCi(path, options);
+  });
+
+const attest = program
+  .command('attest')
+  .description('vendor attestation: the classes that blow a timeline and cannot be scanned');
+
+attest
+  .command('template')
+  .description('emit a blank questionnaire, so the vendor is asked for the right things')
+  .requiredOption('--vendor <name>', 'vendor name')
+  .requiredOption('--product <name>', 'product name')
+  .requiredOption('--system <id>', 'the system in your estate this covers')
+  .option('--out <file>', 'output path', 'attestation.json')
+  .action(async (options) => {
+    await attestTemplate(options);
+  });
+
+attest
+  .command('reconcile <attestation> <path>')
+  .description("compare what the vendor claims against what the estate shows, and rank with their date")
+  .option('--policy <pack>', 'policy pack id', DEFAULT_PACK_ID)
+  .option('--system <id>', 'override the system identifier')
+  .option('--json', 'emit machine-readable output')
+  .option('--now <iso>', 'override the current time, for reproducible runs')
+  .action(async (attestation: string, path: string, options) => {
+    await attestReconcile(attestation, path, options);
   });
 
 const scope = program

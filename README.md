@@ -118,6 +118,7 @@ packages/
   detect-kms/      cloud KMS / HSM key inventory. metadata only, never key material.
   detect-binary/   ELF/Mach-O/PE symbols, byte-exact constants, embedded DER.
   correlate/       joins modalities into Asset -> Occurrence edges, resolves conflicts
+  attest/          vendor questionnaires: claims at 0.40, and the date that drives Y
 apps/
   api/             Fastify + Prisma + Postgres. Ranks on read; never re-derives confidence.
   web/             Next.js. Two worklists, live policy switcher, derivation drill-down.
@@ -157,6 +158,16 @@ Gate a build on newly introduced cryptography:
 
 ```bash
 pnpm assay ci . --baseline .assay-baseline.json
+```
+
+Ask a vendor the right questions, then check the answers:
+
+```bash
+pnpm assay attest template --vendor Acme --product PaymentSwitch --system switch
+```
+
+```bash
+pnpm assay attest reconcile ./attestation.json ./path/to/repo
 ```
 
 Then open http://localhost:3000. Only evidence is stored; the ranking is computed on read, so switching policy packs re-ranks live and marks every row that moved.
@@ -199,7 +210,7 @@ Discovery is table stakes and several of these do it competently. The gap Assay 
 
 ## Status
 
-Phases 0 through 6 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
+All seven phases complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
 
 Phase 1's exit gate was a kill condition, and it passed: two disjoint hand-verified samples across django, Ghost and n8n scored 96.7% and 100% precision at `CONFIRMED`, and 834k LOC of n8n reduced to eleven work items. Details, including what the run does *not* establish, are in [VALIDATION.md](VALIDATION.md). Phase 2 added the scope gate, certificate inventory with a lifetime-vs-deadline check, TLS/SSH capability enumeration, and cloud key-store classification. Its exit gate — that an out-of-scope probe fails at the type level rather than at runtime — is asserted by a compile-time test that runs under `tsc` in CI.
 
@@ -209,6 +220,8 @@ Phase 5 added binary analysis: imported symbol tables, byte-exact algorithm cons
 
 Phase 6 added Go, Java, C, C++, Rust and C#, plus the build gate: `assay ci` fails only on work that is *new* relative to a committed baseline, and suppressions carry a mandatory expiry that `--update-baseline` refuses to renew silently.
 
-Assay gates itself. Its own estate is one finding — the Ed25519 keypair `@assay/scope` uses to sign grants, which is Shor-broken and sits in the committed baseline rather than being hidden.
+Phase 7 added vendor attestation. The questionnaire itself is weak evidence by construction — 0.40, unable to confirm anything. What is worth collecting is the *date*: a vendor committing to 2030-09-01 with an HSM replacement gives Y = 6.52 years, which blows the 2031 deadline by two, and the number carries its provenance into the derivation as an assumption with the class default it replaced shown beside it.
 
-Next is Phase 7, vendor attestation — see [ROADMAP.md](ROADMAP.md).
+Assay gates itself. Its own estate is one finding — the Ed25519 keypair `@assay/scope` uses to sign grants, which is Shor-broken and sits in the committed baseline rather than being hidden. Migrating it to ML-DSA is the obvious first use of this project on itself.
+
+See [ROADMAP.md](ROADMAP.md) for what each phase concluded and [VALIDATION.md](VALIDATION.md) for the Phase 1 kill gate.
