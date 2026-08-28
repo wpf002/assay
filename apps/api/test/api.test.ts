@@ -241,3 +241,122 @@ describe('health and 404s', () => {
     }
   });
 });
+
+/* ------------------------------------------------------------------- estate */
+
+const TRACES = {
+  from: '2026-08-27T00:00:00.000Z',
+  to: '2026-08-28T00:00:00.000Z',
+  source: 'tempo',
+  spans: [
+    { service: 'gateway', spanId: 'a1', parentSpanId: '', operation: 'POST /v1/pay' },
+    { service: 'sample', spanId: 'b1', parentSpanId: 'a1', operation: 'Sign' },
+    { service: 'signing-svc', spanId: 'c1', parentSpanId: 'b1', operation: 'Signer/Sign' },
+    { service: 'reporting', spanId: 'z1', parentSpanId: '', operation: 'cron' },
+  ],
+};
+
+describe('trace ingest keeps the graph and discards the spans', () => {
+  it('accepts a normalized bundle and says what it kept', async () => {
+    const r = await app.inject({ method: 'POST', url: '/traces', payload: TRACES });
+    expect(r.statusCode).toBe(201);
+    const body = r.json<{ spansIngested: number; spansStored: number; edges: number; note: string }>();
+    expect(body.spansIngested).toBe(4);
+    // A span carries request attributes and user identifiers. Knowing that A
+    // called B needs none of it.
+    expect(body.spansStored).toBe(0);
+    expect(body.edges).toBe(2);
+    expect(body.note).toContain('discarded');
+  });
+
+  it('accepts an OTLP export as well, because no two backends agree on a format', async () => {
+    const otlp = {
+      resourceSpans: [
+        {
+          resource: { attributes: [{ key: 'service.name', value: { stringValue: 'edge' } }] },
+          scopeSpans: [{ spans: [{ traceId: 't', spanId: 'o1', name: 'GET /' }] }],
+        },
+      ],
+    };
+    const r = await app.inject({ method: 'POST', url: '/traces', payload: otlp });
+    expect(r.statusCode).toBe(201);
+    expect(r.json<{ services: string[] }>().services).toEqual(['edge']);
+  });
+
+  it('rejects something that is neither', async () => {
+    const r = await app.inject({ method: 'POST', url: '/traces', payload: { nope: true } });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('never returns a span from any endpoint', async () => {
+    await app.inject({ method: 'POST', url: '/traces', payload: TRACES });
+    const list = await app.inject({ method: 'GET', url: '/traces' });
+    const first = list.json<{ id: string }[]>()[0];
+    const one = await app.inject({ method: 'GET', url: `/traces/${first?.id}` });
+    const s = one.body;
+    expect(s).not.toContain('spanId');
+    expect(s).not.toContain('parentSpanId');
+    expect(one.json<{ edges: unknown[] }>().edges.length).toBeGreaterThan(0);
+  });
+});
+
+describe('estate-wide worklists', () => {
+  it('ranks every system together', async () => {
+    await app.inject({ method: 'POST', url: '/traces', payload: TRACES });
+    const r = await app.inject({ method: 'GET', url: `/estate/worklists?now=${T2}` });
+    const body = r.json<{
+      systems: { systemName: string }[];
+      traces: { edges: number } | null;
+      worklists: { confidentiality: unknown[]; authenticity: unknown[] };
+    }>();
+    expect(body.systems.map((s) => s.systemName)).toEqual(['sample']);
+    expect(body.traces?.edges).toBe(2);
+    expect(
+      body.worklists.confidentiality.length + body.worklists.authenticity.length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('uses only the newest scan of each system', async () => {
+    const r = await app.inject({ method: 'GET', url: `/estate/worklists?now=${T2}` });
+    expect(r.json<{ systems: { scanId: string }[] }>().systems[0]?.scanId).toBe(scanB);
+  });
+
+  it('still ranks when there are no traces at all', async () => {
+    const bare = await buildApp({ store: new MemoryScanStore() });
+    await bare.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T1) });
+    const r = await bare.inject({ method: 'GET', url: `/estate/worklists?now=${T1}` });
+    expect(r.json<{ traces: unknown }>().traces).toBeNull();
+    await bare.close();
+  });
+
+  it('404s with no scans rather than returning an empty estate', async () => {
+    const bare = await buildApp({ store: new MemoryScanStore() });
+    expect((await bare.inject({ method: 'GET', url: '/estate/worklists' })).statusCode).toBe(404);
+    await bare.close();
+  });
+});
+
+describe('coverage: the services that call you and have no CBOM', () => {
+  it('names the blind spots', async () => {
+    await app.inject({ method: 'POST', url: '/traces', payload: TRACES });
+    const r = await app.inject({ method: 'GET', url: '/estate/coverage' });
+    const body = r.json<{ unscanned: string[]; scanned: string[]; note: string }>();
+    // gateway, signing-svc and reporting all appear in traces and none has a scan.
+    expect(body.unscanned).toContain('signing-svc');
+    expect(body.unscanned).toContain('gateway');
+    expect(body.scanned).toEqual(['sample']);
+    expect(body.note).toContain('will not close this');
+  });
+
+  it('reports scanned systems that carried no traced traffic without calling them dead', async () => {
+    const r = await app.inject({ method: 'GET', url: '/estate/coverage' });
+    const body = r.json<{ scannedWithoutTraffic: string[] }>();
+    expect(Array.isArray(body.scannedWithoutTraffic)).toBe(true);
+  });
+
+  it('404s when no traces have been ingested', async () => {
+    const bare = await buildApp({ store: new MemoryScanStore() });
+    expect((await bare.inject({ method: 'GET', url: '/estate/coverage' })).statusCode).toBe(404);
+    await bare.close();
+  });
+});

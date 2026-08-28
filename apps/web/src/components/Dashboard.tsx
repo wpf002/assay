@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  getCoverage,
+  getEstate,
   getRerank,
   getWorklists,
+  type Coverage,
   type PolicyPack,
   type ScanSummary,
   type Worklists,
 } from '@/lib/api';
+
+/** Sentinel for the estate view: every system at once, correlated by traces. */
+const ESTATE = '__estate__';
 import { Worklist } from './Worklist';
 
 /**
@@ -26,10 +32,20 @@ export function Dashboard({
   packs: PolicyPack[];
   initialPack: string;
 }) {
-  const [scanId, setScanId] = useState(scans[0]?.id ?? '');
+  // Default to the estate once there is more than one system: a per-scan view
+  // of a signing service is exactly the answer that misses the point.
+  const [scanId, setScanId] = useState(
+    new Set(scans.map((s) => s.systemName)).size > 1 ? ESTATE : (scans[0]?.id ?? ''),
+  );
   const [pack, setPack] = useState(initialPack);
   const [secrecyYears, setSecrecyYears] = useState(5);
   const [worklists, setWorklists] = useState<Worklists | null>(null);
+  const [estate, setEstate] = useState<{
+    systems: number;
+    promoted: { systemId: string; occurrences: number }[];
+    traceWindow: string | null;
+  } | null>(null);
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [moved, setMoved] = useState<Map<string, { before: number; after: number }>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [comparePack, setComparePack] = useState<string>('');
@@ -38,6 +54,32 @@ export function Dashboard({
     if (scanId === '') return;
     let cancelled = false;
     setError(null);
+
+    if (scanId === ESTATE) {
+      Promise.all([getEstate(pack, secrecyYears), getCoverage().catch(() => null)])
+        .then(([e, c]) => {
+          if (cancelled) return;
+          setWorklists(e.worklists);
+          setEstate({
+            systems: e.systems.length,
+            promoted: e.promotedBySystem,
+            traceWindow:
+              e.traces === null
+                ? null
+                : `${e.traces.window.from.slice(0, 10)} to ${e.traces.window.to.slice(0, 10)} from ${e.traces.source}`,
+          });
+          setCoverage(c);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setEstate(null);
+    setCoverage(null);
     getWorklists(scanId, pack, secrecyYears)
       .then((w) => {
         if (!cancelled) setWorklists(w);
@@ -51,7 +93,7 @@ export function Dashboard({
   }, [scanId, pack, secrecyYears]);
 
   useEffect(() => {
-    if (scanId === '' || comparePack === '' || comparePack === pack) {
+    if (scanId === '' || scanId === ESTATE || comparePack === '' || comparePack === pack) {
       setMoved(new Map());
       return;
     }
@@ -89,11 +131,14 @@ export function Dashboard({
       <header className="top">
         <h1>assay</h1>
         <span className="sub">
-          {scan?.systemName} · {scan?.occurrenceCount} work items · {scan?.assetCount} assets
+          {estate === null
+            ? `${scan?.systemName} · ${scan?.occurrenceCount} work items · ${scan?.assetCount} assets`
+            : `${estate.systems} system(s)${estate.traceWindow === null ? ', no traces ingested' : `, traces ${estate.traceWindow}`}`}
         </span>
 
         <div className="controls">
           <select value={scanId} onChange={(e) => setScanId(e.target.value)} aria-label="scan">
+            <option value={ESTATE}>estate · every system, correlated by traces</option>
             {scans.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.systemName} · {s.startedAt.slice(0, 10)}
@@ -162,6 +207,7 @@ export function Dashboard({
               scanId={scanId}
               pack={pack}
               moved={moved}
+              showSystem={estate !== null}
             />
             <Worklist
               title="Authenticity"
@@ -170,8 +216,25 @@ export function Dashboard({
               scanId={scanId}
               pack={pack}
               moved={moved}
+              showSystem={estate !== null}
             />
           </div>
+
+          {estate !== null && estate.promoted.length > 0 && (
+            <p className="aside">
+              Traces reached across the network edge into{' '}
+              {estate.promoted.map((p) => `${p.systemId} (${p.occurrences})`).join(', ')} — work that
+              static analysis inside those repositories could not see, because the caller is a
+              different service.
+            </p>
+          )}
+
+          {coverage !== null && coverage.unscanned.length > 0 && (
+            <p className="caveat" style={{ color: 'var(--warn)' }}>
+              Blind spots: {coverage.unscanned.join(', ')} participate in traced calls and have no
+              CBOM. Scanning your own repositories will not close this.
+            </p>
+          )}
 
           <p className="aside">
             {worklists.unreached.length} finding(s) analyzed and not reachable, and{' '}

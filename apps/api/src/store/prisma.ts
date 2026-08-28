@@ -1,6 +1,12 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { gate, type CallFrame, type CryptoAsset, type Factor, type Occurrence } from '@assay/core';
-import { summarize, type ScanStore, type ScanSummary, type StoredScan } from './types.js';
+import {
+  summarize,
+  type ScanStore,
+  type ScanSummary,
+  type StoredScan,
+  type StoredTraceBundle,
+} from './types.js';
 
 /**
  * Postgres-backed store.
@@ -143,6 +149,68 @@ export class PrismaScanStore implements ScanStore {
     return rows.map(hydrate);
   }
 
+  async latestPerSystem(): Promise<StoredScan[]> {
+    const newest = await this.prisma.scan.findMany({
+      distinct: ['systemName'],
+      orderBy: [{ systemName: 'asc' }, { startedAt: 'desc' }],
+      select: { id: true },
+    });
+    const scans = await Promise.all(newest.map((r) => this.get(r.id)));
+    return scans.filter((s): s is StoredScan => s !== null);
+  }
+
+  async putTraces(bundle: StoredTraceBundle): Promise<void> {
+    await this.prisma.traceBundle.upsert({
+      where: { id: bundle.id },
+      create: {
+        id: bundle.id,
+        source: bundle.source,
+        windowFrom: new Date(bundle.windowFrom),
+        windowTo: new Date(bundle.windowTo),
+        ingestedAt: new Date(bundle.ingestedAt),
+        spanCount: bundle.spanCount,
+        rootServices: [...bundle.rootServices],
+        // Only the edges. The spans were discarded at ingest and there is no
+        // column here that could hold them.
+        edges: {
+          create: bundle.edges.map((e) => ({
+            fromService: e.from,
+            toService: e.to,
+            observations: e.observations,
+            operation: e.operation,
+          })),
+        },
+      },
+      update: {},
+    });
+  }
+
+  async listTraces(): Promise<Omit<StoredTraceBundle, 'edges'>[]> {
+    const rows = await this.prisma.traceBundle.findMany({ orderBy: { ingestedAt: 'desc' } });
+    return rows.map((r) => ({
+      id: r.id,
+      source: r.source,
+      windowFrom: r.windowFrom.toISOString(),
+      windowTo: r.windowTo.toISOString(),
+      ingestedAt: r.ingestedAt.toISOString(),
+      spanCount: r.spanCount,
+      rootServices: r.rootServices,
+    }));
+  }
+
+  async getTraces(id: string): Promise<StoredTraceBundle | null> {
+    const row = await this.prisma.traceBundle.findUnique({ where: { id }, include: { edges: true } });
+    return row === null ? null : hydrateTraces(row);
+  }
+
+  async latestTraces(): Promise<StoredTraceBundle | null> {
+    const row = await this.prisma.traceBundle.findFirst({
+      orderBy: { ingestedAt: 'desc' },
+      include: { edges: true },
+    });
+    return row === null ? null : hydrateTraces(row);
+  }
+
   async close(): Promise<void> {
     await this.prisma.$disconnect();
   }
@@ -258,6 +326,37 @@ function hydrate(row: NonNullable<ScanRow>): StoredScan {
     scopeGrantId: row.scopeGrantId,
     occurrences: occurrences.sort((a, b) => a.id.localeCompare(b.id)),
     assets: [...assets.values()].sort((a, b) => a.id.localeCompare(b.id)),
+  };
+}
+
+interface TraceRow {
+  id: string;
+  source: string;
+  windowFrom: Date;
+  windowTo: Date;
+  ingestedAt: Date;
+  spanCount: number;
+  rootServices: string[];
+  edges: { fromService: string; toService: string; observations: number; operation: string }[];
+}
+
+function hydrateTraces(row: TraceRow): StoredTraceBundle {
+  return {
+    id: row.id,
+    source: row.source,
+    windowFrom: row.windowFrom.toISOString(),
+    windowTo: row.windowTo.toISOString(),
+    ingestedAt: row.ingestedAt.toISOString(),
+    spanCount: row.spanCount,
+    rootServices: row.rootServices,
+    edges: row.edges
+      .map((e) => ({
+        from: e.fromService,
+        to: e.toService,
+        observations: e.observations,
+        operation: e.operation,
+      }))
+      .sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to)),
   };
 }
 

@@ -72,6 +72,14 @@ Static analysis stops at the network edge, and that is the largest false negativ
 pnpm assay scan ./signing-svc --traces ./otlp-export.json
 ```
 
+Estate-wide, upload the traces once and every system is correlated together:
+
+```bash
+pnpm assay traces push ./otlp-export.json
+```
+
+Spans are discarded at ingest; only the service graph is kept. A span carries request attributes and user identifiers, and knowing that the payments API calls the signing service needs none of it. `GET /estate/coverage` then names the services that call you and have no CBOM at all — a hole scanning your own repositories will never close.
+
 Competitors claim reachability. Assay ships the **path**, in CycloneDX `evidence.callstack`, where someone who does not trust us can check it — and it says *how* it concluded reachability, because "a request handler calls this" and "this module is published, so somebody's handler might" are different claims: `OBSERVED`, `ENTRY_POINT`, `DEPLOYED_CONFIG`, `LIBRARY_SURFACE`, or `NONE`.
 
 ---

@@ -52,6 +52,31 @@ export interface ScanSummary {
   readonly detectors: readonly string[];
 }
 
+/**
+ * A trace bundle, reduced to its service graph.
+ *
+ * Spans are ingested and discarded; only edges are kept. A span carries
+ * request attributes, user identifiers and sometimes payload fragments, and
+ * knowing that the payments API calls the signing service requires none of
+ * that. Persisting raw spans would make this tool a second copy of the most
+ * sensitive telemetry an organization has, for no analytical gain.
+ */
+export interface StoredTraceBundle {
+  readonly id: string;
+  readonly source: string;
+  readonly windowFrom: string;
+  readonly windowTo: string;
+  readonly ingestedAt: string;
+  readonly spanCount: number;
+  readonly rootServices: readonly string[];
+  readonly edges: readonly {
+    readonly from: string;
+    readonly to: string;
+    readonly observations: number;
+    readonly operation: string;
+  }[];
+}
+
 export interface ScanStore {
   readonly kind: 'memory' | 'prisma';
   put(scan: StoredScan): Promise<void>;
@@ -59,6 +84,15 @@ export interface ScanStore {
   get(id: string): Promise<StoredScan | null>;
   /** The two most recent scans of a system, newest first. The default diff. */
   recent(systemName: string, limit: number): Promise<StoredScan[]>;
+  /** The most recent scan of every system. The estate as it currently stands. */
+  latestPerSystem(): Promise<StoredScan[]>;
+
+  putTraces(bundle: StoredTraceBundle): Promise<void>;
+  listTraces(): Promise<Omit<StoredTraceBundle, 'edges'>[]>;
+  getTraces(id: string): Promise<StoredTraceBundle | null>;
+  /** Newest bundle, for `?traces=latest`. */
+  latestTraces(): Promise<StoredTraceBundle | null>;
+
   close(): Promise<void>;
 }
 

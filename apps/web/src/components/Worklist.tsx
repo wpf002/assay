@@ -18,6 +18,7 @@ export function Worklist({
   scanId,
   pack,
   moved,
+  showSystem,
 }: {
   title: string;
   subtitle: string;
@@ -25,6 +26,12 @@ export function Worklist({
   scanId: string;
   pack: string;
   moved: Map<string, { before: number; after: number }>;
+  /**
+   * Estate-wide, the same asset legitimately appears once per system and the
+   * rows are otherwise identical. Without the system name the list reads as
+   * duplicates of one finding rather than as separate work items.
+   */
+  showSystem: boolean;
 }) {
   const [open, setOpen] = useState<string | null>(null);
 
@@ -43,6 +50,7 @@ export function Worklist({
             scanId={scanId}
             pack={pack}
             moved={moved.get(f.occurrenceId)}
+            showSystem={showSystem}
             open={open === f.occurrenceId}
             onToggle={() => setOpen(open === f.occurrenceId ? null : f.occurrenceId)}
           />
@@ -57,6 +65,7 @@ function Row({
   scanId,
   pack,
   moved,
+  showSystem,
   open,
   onToggle,
 }: {
@@ -64,6 +73,7 @@ function Row({
   scanId: string;
   pack: string;
   moved: { before: number; after: number } | undefined;
+  showSystem: boolean;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -77,6 +87,7 @@ function Row({
         <div>
           <div className="name">{f.assetName}</div>
           <div className="meta">
+            {showSystem && <span className="chip">{f.systemId}</span>}
             <span className={`chip ${f.assertionLevel.toLowerCase()}`}>{f.assertionLevel}</span>
             <span className="chip">{f.controlClass}</span>
             <span className="chip">{f.purpose}</span>

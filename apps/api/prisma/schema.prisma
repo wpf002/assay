@@ -107,3 +107,40 @@ model Scan {
 
   @@index([systemName, startedAt])
 }
+
+/// Derived service graph from distributed traces.
+///
+/// PRIVACY: spans are ingested and DISCARDED. Only the edges survive - which
+/// service called which, how often, and one representative operation name.
+/// A span carries request attributes, user identifiers and sometimes payload
+/// fragments, and a cryptographic inventory needs none of that to know that
+/// the payments API calls the signing service. Persisting the raw spans would
+/// turn this tool into a second copy of the most sensitive telemetry an
+/// organization has, for no analytical gain.
+model TraceBundle {
+  id           String       @id
+  source       String
+  windowFrom   DateTime
+  windowTo     DateTime
+  ingestedAt   DateTime     @default(now())
+  /// Count of spans seen at ingest. The spans themselves are not stored.
+  spanCount    Int
+  /// Services called from outside the traced estate: reachable by definition.
+  rootServices String[]
+  edges        TraceEdge[]
+
+  @@index([ingestedAt])
+}
+
+model TraceEdge {
+  id           String      @id @default(cuid())
+  bundle       TraceBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  bundleId     String
+  fromService  String
+  toService    String
+  observations Int
+  operation    String
+
+  @@unique([bundleId, fromService, toService])
+  @@index([bundleId])
+}

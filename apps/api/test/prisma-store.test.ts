@@ -101,3 +101,80 @@ maybe('postgres round trip', () => {
     }
   }, 120_000);
 });
+
+maybe('trace persistence', () => {
+  it('keeps the edges and has nowhere to put the spans', async () => {
+    const store = PrismaScanStore.fromUrl(url as string);
+    try {
+      const id = `tb-${Date.now().toString(36)}`;
+      await store.putTraces({
+        id,
+        source: 'tempo',
+        windowFrom: '2026-08-27T00:00:00.000Z',
+        windowTo: '2026-08-28T00:00:00.000Z',
+        ingestedAt: '2026-08-28T00:00:00.000Z',
+        spanCount: 4,
+        rootServices: ['gateway'],
+        edges: [
+          { from: 'gateway', to: 'payments', observations: 12, operation: 'Payments/Create' },
+          { from: 'payments', to: 'signing', observations: 12, operation: 'Signer/Sign' },
+        ],
+      });
+
+      const loaded = await store.getTraces(id);
+      expect(loaded?.edges).toHaveLength(2);
+      expect(loaded?.spanCount).toBe(4);
+      expect(loaded?.rootServices).toEqual(['gateway']);
+      // The count survives; the spans do not, and there is no column that
+      // could hold them.
+      expect(JSON.stringify(loaded)).not.toContain('spanId');
+    } finally {
+      await store.close();
+    }
+  }, 120_000);
+
+  it('returns the newest bundle for ?traces=latest', async () => {
+    const store = PrismaScanStore.fromUrl(url as string);
+    try {
+      const stamp = Date.now().toString(36);
+      for (const [i, at] of ['2026-08-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z'].entries()) {
+        await store.putTraces({
+          id: `latest-${stamp}-${i}`,
+          source: 'tempo',
+          windowFrom: at,
+          windowTo: at,
+          ingestedAt: at,
+          spanCount: 1,
+          rootServices: [],
+          edges: [],
+        });
+      }
+      expect((await store.latestTraces())?.id).toBe(`latest-${stamp}-1`);
+    } finally {
+      await store.close();
+    }
+  }, 120_000);
+
+  it('returns only the newest scan per system for the estate view', async () => {
+    const store = PrismaScanStore.fromUrl(url as string);
+    try {
+      const stamp = Date.now().toString(36);
+      const system = `estate-${stamp}`;
+      const first = { ...(await fixtureScan(`e1-${stamp}`)), systemName: system };
+      const second = {
+        ...(await fixtureScan(`e2-${stamp}`)),
+        systemName: system,
+        startedAt: '2026-09-15T00:00:00.000Z',
+      };
+      await store.put(first);
+      await store.put(second);
+
+      const latest = await store.latestPerSystem();
+      const mine = latest.filter((s) => s.systemName === system);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]?.id).toBe(second.id);
+    } finally {
+      await store.close();
+    }
+  }, 180_000);
+});

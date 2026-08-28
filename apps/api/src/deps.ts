@@ -20,4 +20,13 @@ export type {
   ScanSnapshot,
   Worklists,
 } from '@assay/core';
-export { divergences as divergencesOf } from '@assay/correlate';
+export {
+  divergences as divergencesOf,
+  applyTraceReachability,
+  buildServiceGraph,
+  spansFromOtlp,
+  traceRoots,
+  SpanRecordSchema,
+  TraceBundleSchema,
+} from '@assay/correlate';
+export type { ServiceGraph, SpanRecord } from '@assay/correlate';

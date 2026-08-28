@@ -8,6 +8,7 @@ import { runPush } from './commands/push.js';
 import { runCi } from './commands/ci.js';
 import { attestReconcile, attestTemplate } from './commands/attest.js';
 import { packKeygen, packSign } from './commands/policy.js';
+import { runTracesPush } from './commands/traces-push.js';
 
 const program = new Command('assay').description(
   'Cryptographic bill of materials - discovery, inventory, migration ranking',
@@ -78,6 +79,18 @@ program
   .option('--now <iso>', 'override the current time, for reproducible runs')
   .action(async (path: string, options) => {
     await runCi(path, options);
+  });
+
+const traces = program
+  .command('traces')
+  .description('distributed traces: reachability across the network edge');
+
+traces
+  .command('push <file>')
+  .description('upload an OTLP export or trace bundle; only the service graph is kept')
+  .option('--api <url>', 'API base URL', process.env['ASSAY_API'] ?? 'http://localhost:3001')
+  .action(async (file: string, options: { api: string }) => {
+    await runTracesPush(file, options);
   });
 
 const attest = program

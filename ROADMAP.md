@@ -128,7 +128,7 @@ Assay records that a key exists, its algorithm, and its size. It never reads, st
 | 5 | Binary analysis | done — last on purpose |
 | 6 | Language expansion + CI | done — breadth after depth |
 | 7 | Vendor attestation | done — now a FAR compliance artifact, not an upsell |
-| 8 | Cross-process reachability | engine done; estate-wide correlation in the API is next |
+| 8 | Cross-process reachability | done — engine, persistence, and the estate view |
 
 ---
 
@@ -354,7 +354,13 @@ Distributed traces have it. A parent span in service A with a child span in serv
 
 The cross-service path ships into CycloneDX `evidence.callstack` ahead of the in-process frames: `gateway -> payments => payments -> signing-svc => src/signer.ts`.
 
-**Remaining:** the CLI applies traces to one scan at a time. The form that matters is estate-wide — traces stored alongside scans in the API, correlated across every system at once. That needs a second entity in the store and a migration, and is a phase of its own rather than something to half-build here.
+**Estate-wide correlation shipped.** `POST /traces` accepts an OTLP export or a bundle; `GET /estate/worklists` takes the newest scan of every system, correlates them through the service graph, and ranks the whole estate together. Trace propagation starts from services called from outside the estate plus any system already reachable on its own terms (`ENTRY_POINT`, `DEPLOYED_CONFIG`, `OBSERVED`), which is derived from stored evidence rather than re-scanned.
+
+**Spans are ingested and discarded; only edges are persisted.** A span carries request attributes, user identifiers and sometimes payload fragments, and knowing that the payments API calls the signing service needs none of it. There is no column in the schema that could hold a span, the ingest response states `spansStored: 0`, and a test asserts no endpoint ever returns one. Persisting raw spans would make a cryptographic inventory tool a second copy of the most sensitive telemetry an organization has, for no analytical gain.
+
+**`GET /estate/coverage` is the blind-spot list**, and it may be the most useful single endpoint in the product: services that participate in traced calls and have no CBOM at all. On the demo estate it names `gateway` and `legacy-fx` — a hole that no amount of scanning your own repositories will close.
+
+The dashboard defaults to the estate view once more than one system exists, because a per-scan view of a signing service is precisely the answer that misses the point. Each row carries its system, since estate-wide the same asset legitimately appears once per system and the rows are otherwise identical.
 
 ---
 

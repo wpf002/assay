@@ -98,6 +98,26 @@ export interface Derivation {
   };
 }
 
+export interface EstateResult {
+  systems: { systemName: string; scanId: string; startedAt: string }[];
+  traces: {
+    id: string;
+    source: string;
+    window: { from: string; to: string };
+    edges: number;
+    rootServices: string[];
+  } | null;
+  promotedBySystem: { systemId: string; occurrences: number }[];
+  worklists: Worklists;
+}
+
+export interface Coverage {
+  servicesObserved: string[];
+  scanned: string[];
+  unscanned: string[];
+  note: string;
+}
+
 export interface RerankResult {
   from: string;
   to: string;
@@ -123,5 +143,8 @@ export const getWorklists = (scanId: string, pack: string, secrecyYears: number)
   get(`/scans/${scanId}/worklists?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`);
 export const getDerivation = (scanId: string, occId: string, pack: string): Promise<Derivation> =>
   get(`/scans/${scanId}/occurrences/${encodeURIComponent(occId)}?pack=${encodeURIComponent(pack)}`);
+export const getEstate = (pack: string, secrecyYears: number): Promise<EstateResult> =>
+  get(`/estate/worklists?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`);
+export const getCoverage = (): Promise<Coverage> => get('/estate/coverage');
 export const getRerank = (scanId: string, from: string, to: string): Promise<RerankResult> =>
   get(`/scans/${scanId}/rerank?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
