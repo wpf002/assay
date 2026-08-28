@@ -263,11 +263,18 @@ function lineOf(text: string, needle: string): number {
   return text.slice(0, idx).split('\n').length;
 }
 
-/** Names that look cryptographic but are not in the catalog. Reported as a coverage gap. */
+/**
+ * Names that look cryptographic but are not in the catalog. Reported as a
+ * coverage gap, so the pattern has to be tight: a loose one buries the real
+ * gaps under `design-system` (sign), `ajv-keywords` (key) and `alien-signals`.
+ * Matching is on token boundaries within the package name, not substrings.
+ */
+const CRYPTO_TOKENS =
+  /(^|[^a-z])(crypto|crypt|cipher|tls|ssl|pki|x509|jwt|jose|jwk|jws|jwe|rsa|dsa|ecdsa|eddsa|ed25519|x25519|nacl|sodium|hmac|sha1|sha256|sha512|md5|aes|pgp|gpg|pbkdf2|bcrypt|scrypt|argon2|keystore|keyring|signature)([^a-z]|$)/i;
+
 function looksCryptographic(name: string): boolean {
-  return /crypt|cipher|tls|ssl|pki|x509|jwt|jose|jwk|rsa|ecdsa|ed25519|nacl|sodium|hash|digest|sign|key/i.test(
-    name,
-  );
+  const bare = name.replace(/^@[^/]+\//, '');
+  return CRYPTO_TOKENS.test(bare);
 }
 
 export { CATALOG };

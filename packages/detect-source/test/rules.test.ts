@@ -227,3 +227,37 @@ AES.new(key, AES.MODE_GCM)
     expect(d.some((x) => x.primitive === 'ECDSA')).toBe(true);
   });
 });
+
+describe('unverifiable developer claims taint provenance (I6)', () => {
+  it('marks hashlib usedforsecurity=False as an assumption', () => {
+    const d = py(`import hashlib\nhashlib.md5(data, usedforsecurity=False)`);
+    expect(d[0]?.primitive).toBe('MD5');
+    // Still inventory - the call is really there - but not confirmable work.
+    expect(d[0]?.assumptions?.[0]).toContain('usedforsecurity=False');
+  });
+
+  it('leaves an ordinary digest call untainted', () => {
+    const d = py(`import hashlib\nhashlib.md5(data)`);
+    expect(d[0]?.assumptions).toBeUndefined();
+  });
+});
+
+describe('python hmac module', () => {
+  it('reads the digest from the third positional argument', () => {
+    const d = py(`
+import hmac
+import hashlib
+hmac.new(key, msg, hashlib.sha256)
+`);
+    expect(d.map((x) => x.primitive).sort()).toEqual(['HMAC', 'SHA2']);
+  });
+
+  it('reads the digestmod keyword', () => {
+    const d = py(`import hmac\nhmac.new(key, msg=data, digestmod='sha1')`);
+    expect(d.find((x) => x.primitive === 'HMAC')?.parameters['hash']).toBe('SHA1');
+  });
+
+  it('does not fire without the import', () => {
+    expect(py(`hmac.new(key, msg, hashlib.sha256)`)).toHaveLength(0);
+  });
+});

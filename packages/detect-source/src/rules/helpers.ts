@@ -59,6 +59,7 @@ export function detection(
   purpose: Purpose,
   purposeSource: PurposeSource = 'RESOLVED',
   note?: string,
+  assumptions?: readonly string[],
 ): Detection {
   return {
     primitive,
@@ -67,6 +68,7 @@ export function detection(
     purposeSource,
     ruleId,
     ...(note === undefined ? {} : { note }),
+    ...(assumptions === undefined || assumptions.length === 0 ? {} : { assumptions }),
   };
 }
 

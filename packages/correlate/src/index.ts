@@ -33,7 +33,7 @@ export interface AssembleResult {
 
 export function assemble(findings: readonly Finding[]): AssembleResult {
   const assets = new Map<string, CryptoAsset>();
-  const groups = new Map<string, { key: GroupKey; evidence: Evidence[] }>();
+  const groups = new Map<string, { key: GroupKey; evidence: Evidence[]; assumptions: Set<string> }>();
 
   for (const f of findings) {
     assets.set(f.asset.id, f.asset);
@@ -43,9 +43,10 @@ export function assemble(findings: readonly Finding[]): AssembleResult {
       controlClass: f.controlClass,
     };
     const id = occurrenceId(key);
-    const group = groups.get(id);
-    if (group) group.evidence.push(f.evidence);
-    else groups.set(id, { key, evidence: [f.evidence] });
+    const group = groups.get(id) ?? { key, evidence: [], assumptions: new Set<string>() };
+    group.evidence.push(f.evidence);
+    for (const a of f.assumptions ?? []) group.assumptions.add(a);
+    groups.set(id, group);
   }
 
   const occurrences = [...groups.entries()]
@@ -60,6 +61,27 @@ export function assemble(findings: readonly Finding[]): AssembleResult {
             ? cmp(a.locator, b.locator)
             : cmp(a.raw, b.raw),
       );
+      const base = computeConfidence(evidence);
+      // An ASSUMPTION anywhere in the path caps the export tier (I6). The
+      // numeric confidence is unchanged - the evidence is as strong as it was -
+      // but the finding can no longer launder a developer's unverifiable claim
+      // into a CONFIRMED assertion.
+      const confidence =
+        g.assumptions.size === 0
+          ? base
+          : {
+              ...base,
+              sources: [
+                ...base.sources,
+                ...[...g.assumptions].sort().map((label) => ({
+                  kind: 'ASSUMPTION' as const,
+                  label,
+                  value: true,
+                  weight: 0,
+                  sources: [],
+                })),
+              ],
+            };
       return {
         id,
         assetId: g.key.assetId,
@@ -67,7 +89,7 @@ export function assemble(findings: readonly Finding[]): AssembleResult {
         controlClass: g.key.controlClass,
         reachability: null,
         evidence,
-        confidence: computeConfidence(evidence),
+        confidence,
       } satisfies Occurrence;
     });
 

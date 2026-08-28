@@ -56,6 +56,8 @@ export interface Detection {
   readonly purposeSource: PurposeSource;
   readonly ruleId: string;
   readonly note?: string;
+  /** Unverifiable claims the rule relied on. Taint the provenance path (I6). */
+  readonly assumptions?: readonly string[];
 }
 
 export interface Rule {

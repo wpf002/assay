@@ -177,7 +177,28 @@ const hashlib: Rule = {
     if (call.method === 'scrypt') return [detection(id, 'scrypt', {}, 'KEY_DERIVATION')];
     const name = call.method === 'new' ? str(arg(call, 0, 'name')) : call.method;
     const spec = name === null ? null : hashFromName(name);
-    return spec === null ? [] : [detection(id, spec.primitive, spec.parameters, 'INTEGRITY')];
+    if (spec === null) return [];
+
+    // Python 3.9's usedforsecurity=False is the developer asserting this digest
+    // is a cache key or an ETag, not a security control. Nothing in the source
+    // can verify that, so it enters as an ASSUMPTION: the asset stays in the
+    // inventory at OBSERVED and cannot reach the worklist as CONFIRMED work.
+    // Django alone carries ten of these; ranking them as integrity findings is
+    // exactly the noise the ceilings exist to prevent.
+    const declaredNonSecurity = call.kwargs['usedforsecurity']?.boolean === false;
+    return [
+      detection(
+        id,
+        spec.primitive,
+        spec.parameters,
+        'INTEGRITY',
+        declaredNonSecurity ? 'RULE_DEFAULT' : 'RESOLVED',
+        declaredNonSecurity ? 'call declares usedforsecurity=False' : undefined,
+        declaredNonSecurity
+          ? ['developer asserts usedforsecurity=False; not verifiable from source']
+          : undefined,
+      ),
+    ];
   },
 };
 
@@ -302,7 +323,28 @@ const paramiko: Rule = {
   },
 };
 
+const pyhmac: Rule = {
+  id: 'py/hmac',
+  languages: ['python'],
+  methods: ['new', 'digest'],
+  requiresImport: ['hmac'],
+  rationale:
+    'hmac.new(key, msg, hashlib.sha256) names its digest in argument 2 or the digestmod keyword. Django and most Python webhook verification live here, and a rule set without it misses the integrity surface entirely.',
+  detect(call, ctx) {
+    if (!boundTo(call, ctx, ['hmac'])) return [];
+    const digestArg = arg(call, 2, 'digestmod');
+    const raw = str(digestArg) ?? digestArg?.callee?.split('.').pop() ?? digestArg?.text.split('.').pop();
+    const spec = raw === undefined || raw === null ? null : hashFromName(raw);
+    const out: Detection[] = [
+      detection(pyhmac.id, 'HMAC', spec === null ? {} : { hash: spec.primitive }, 'INTEGRITY'),
+    ];
+    if (spec) out.push(detection(pyhmac.id, spec.primitive, spec.parameters, 'INTEGRITY'));
+    return out;
+  },
+};
+
 export const PYTHON_RULES: readonly Rule[] = [
+  pyhmac,
   pycaAsymmetric,
   pycaHash,
   pycaCipher,

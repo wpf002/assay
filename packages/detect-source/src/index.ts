@@ -174,6 +174,7 @@ function toFinding(
     asset: makeAsset(d.primitive, d.parameters, d.purpose),
     systemId: opts.systemId,
     controlClass,
+    ...(d.assumptions === undefined ? {} : { assumptions: d.assumptions }),
     evidence: {
       modality,
       locator: `${file}:${line}`,

@@ -102,3 +102,20 @@ category = "dev"
     expect(findings.every((f) => f.evidence.raw.includes('scope=prod'))).toBe(true);
   });
 });
+
+describe('coverage-gap reporting is tight enough to be useful', () => {
+  it('does not flag packages that merely contain sign / key / crypt as substrings', async () => {
+    const dir = await fixture({
+      'package.json': JSON.stringify({
+        dependencies: {
+          '@n8n/design-system': '1',
+          'ajv-keywords': '1',
+          'alien-signals': '1',
+          'browserify-rsa': '1',
+        },
+      }),
+    });
+    const { uncatalogued } = await scanDependencies({ root: dir, ...OPTS });
+    expect(uncatalogued).toEqual(['npm:browserify-rsa']);
+  });
+});

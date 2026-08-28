@@ -159,4 +159,6 @@ Discovery is table stakes and several of these do it competently. The gap Assay 
 
 ## Status
 
-Phase 0 complete: the engine is implemented and tested, not stubbed. Detectors are next. See [ROADMAP.md](ROADMAP.md).
+Phases 0 and 1 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
+
+Phase 1's exit gate was a kill condition, and it passed: two disjoint hand-verified samples across django, Ghost and n8n scored 96.7% and 100% precision at `CONFIRMED`, and 834k LOC of n8n reduced to eleven work items. Details, including what the run does *not* establish, are in [VALIDATION.md](VALIDATION.md). Next is Phase 2 — see [ROADMAP.md](ROADMAP.md).

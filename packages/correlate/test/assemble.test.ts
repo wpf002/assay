@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { makeAsset, type Finding, type Modality } from '@assay/core';
+import { gate, isTainted, makeAsset, type Factor, type Finding, type Modality, type Occurrence } from '@assay/core';
 import { assemble } from '../src/index.js';
 
 const ASSET = makeAsset('RSA', { modulusLength: 2048 }, 'KEY_ESTABLISHMENT');
@@ -93,5 +93,39 @@ describe('confidence flows through', () => {
     expect(Number(both.occurrences[0]?.confidence.value)).toBe(
       Number(source.occurrences[0]?.confidence.value),
     );
+  });
+});
+
+describe('detector assumptions reach the export gate', () => {
+  it('taints the confidence tree without changing the number', () => {
+    const plain = assemble([finding('SOURCE_AST', 'a.py:1')]);
+    const tainted = assemble([
+      { ...finding('SOURCE_AST', 'a.py:1'), assumptions: ['developer asserts usedforsecurity=False'] },
+    ]);
+    expect(Number(tainted.occurrences[0]?.confidence.value)).toBe(
+      Number(plain.occurrences[0]?.confidence.value),
+    );
+    expect(isTainted(tainted.occurrences[0]?.confidence as Factor)).toBe(true);
+    expect(isTainted(plain.occurrences[0]?.confidence as Factor)).toBe(false);
+  });
+
+  it('downgrades the assertion from CONFIRMED to OBSERVED', () => {
+    const tainted = assemble([
+      { ...finding('SOURCE_AST', 'a.py:1'), assumptions: ['developer asserts usedforsecurity=False'] },
+    ]);
+    expect(gate(tainted.occurrences[0] as Occurrence).assertionLevel).toBe('OBSERVED');
+  });
+
+  it('deduplicates identical assumptions across many findings', () => {
+    const { occurrences } = assemble(
+      Array.from({ length: 5 }, (_, i) => ({
+        ...finding('SOURCE_AST', `a.py:${i}`),
+        assumptions: ['same claim'],
+      })),
+    );
+    const assumptionNodes = (occurrences[0]?.confidence.sources ?? []).filter(
+      (f) => f.kind === 'ASSUMPTION',
+    );
+    expect(assumptionNodes).toHaveLength(1);
   });
 });
