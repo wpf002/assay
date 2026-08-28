@@ -126,7 +126,7 @@ Assay records that a key exists, its algorithm, and its size. It never reads, st
 | 3 | Correlation + reachability | done — where it becomes worth money |
 | 4 | API, persistence, web | done — makes the derivation clickable |
 | 5 | Binary analysis | done — last on purpose |
-| 6 | Language expansion + CI | breadth after depth |
+| 6 | Language expansion + CI | done — breadth after depth |
 | 7 | Vendor attestation | now a FAR compliance artifact, not an upsell |
 
 ---
@@ -277,9 +277,19 @@ Deliberately last. Highest effort, lowest confidence, and shipping it early buri
 
 ## 10. Phase 6 — Language expansion and CI integration
 
-- Go, Java, C/C++, Rust, C# AST rules
-- GitHub Action and pre-commit hook: fail the build on a new `CONFIRMED` quantum-vulnerable occurrence in reachable code
-- Baseline and suppression **with mandatory expiry** — a suppression that never expires is a lie
+**Status: complete.**
+
+**Ten languages.** Go, Java, C, C++, Rust and C# join TypeScript, TSX, JavaScript and Python. Each library family gets rules shaped to its own idiom rather than one generic pattern that half-works everywhere: Go names the algorithm in the package path, Java in a transformation string passed to a factory (`"AES/CBC/PKCS5Padding"`, where the mode and padding are half the security story), OpenSSL in the function name, .NET in the class. Import gating is per-language and is the single largest lever on precision — a local class called `Cipher` is not `javax.crypto.Cipher`.
+
+This is where the estate actually lives. A TypeScript-only scanner reports on the layer a company rewrote last year and says nothing about the payments core or the twelve-year-old Java service that signs everything.
+
+**The build gate fails on what is NEW.** A gate that fails on the existing estate fails on day one in every repository and is switched off by Friday, which protects nothing. Only `CONFIRMED` + reachable + quantum-vulnerable findings absent from the committed baseline can fail a build; `OBSERVED` evidence is not certain enough to block a merge, and an unreached finding is not exposure.
+
+**Suppressions carry a mandatory expiry, and it is enforced three ways.** The schema will not parse one without a date. A suppression may not run longer than 365 days — anything longer is a decision never to fix it and should be recorded as one. And `--update-baseline` *drops* expired suppressions rather than renewing them, because silently rolling one forward is how a temporary exception becomes permanent without anyone deciding to make it so. An expired suppression is reported as its own outcome: a lapsed decision to remake, not a mysterious new finding.
+
+Ships as a composite GitHub Action (`.github/actions/assay-scan`), a `.pre-commit-hooks.yaml` entry, and `assay ci`.
+
+**Assay gates itself**, and its own estate is one finding: the Ed25519 keypair `@assay/scope` uses to sign grants. Shor-broken, on the authenticity track, found by the tool in its own source. It is in the committed baseline rather than hidden, and migrating it to ML-DSA is the obvious first use of this project on itself.
 
 ---
 

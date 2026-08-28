@@ -5,6 +5,7 @@ import { runScan } from './commands/scan.js';
 import { runProbe } from './commands/probe.js';
 import { keygen, sign, verify } from './commands/scope.js';
 import { runPush } from './commands/push.js';
+import { runCi } from './commands/ci.js';
 
 const program = new Command('assay').description(
   'Cryptographic bill of materials - discovery, inventory, migration ranking',
@@ -58,6 +59,21 @@ program
   .option('--now <iso>', 'override the current time, for reproducible runs')
   .action(async (path: string, options) => {
     await runPush(path, options);
+  });
+
+program
+  .command('ci <path>')
+  .description('fail the build on NEW confirmed, reachable, quantum-vulnerable work')
+  .option('--baseline <file>', 'accepted-estate baseline', '.assay-baseline.json')
+  .option('--policy <pack>', 'policy pack id', DEFAULT_PACK_ID)
+  .option('--system <id>', 'system identifier (defaults to the directory name)')
+  .option('--update-baseline', 'accept the current estate and write the baseline')
+  .option('--include-library-surface', 'also gate on findings reachable only via a published surface')
+  .option('--no-binaries', 'skip binary analysis')
+  .option('--json', 'emit the gate result as JSON')
+  .option('--now <iso>', 'override the current time, for reproducible runs')
+  .action(async (path: string, options) => {
+    await runCi(path, options);
   });
 
 const scope = program

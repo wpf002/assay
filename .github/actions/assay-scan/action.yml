@@ -1,0 +1,80 @@
+name: 'Assay cryptographic gate'
+description: >-
+  Fail the build when a change introduces new confirmed, reachable,
+  quantum-vulnerable cryptography. Existing findings do not fail; only what is
+  new relative to the baseline does.
+author: Assay
+
+inputs:
+  path:
+    description: Directory to scan.
+    required: false
+    default: '.'
+  baseline:
+    description: >-
+      Accepted-estate baseline. Commit this file. Regenerate it deliberately
+      with `assay ci . --update-baseline`, never automatically in CI - a gate
+      that re-baselines itself accepts everything.
+    required: false
+    default: '.assay-baseline.json'
+  policy:
+    description: Policy pack supplying the deadline and CRQC assumptions.
+    required: false
+    default: 'eo-14412'
+  include-library-surface:
+    description: >-
+      Also gate on findings reachable only because they sit in a published
+      package surface. Off by default: for a library that is most of the code.
+    required: false
+    default: 'false'
+  binaries:
+    description: Scan committed binaries as well as source.
+    required: false
+    default: 'true'
+  cbom:
+    description: Path to write the CycloneDX document, or empty to skip.
+    required: false
+    default: ''
+
+outputs:
+  passed:
+    description: 'true when no new blocking work was introduced'
+    value: ${{ steps.gate.outputs.passed }}
+  introduced:
+    description: 'count of new blocking work items'
+    value: ${{ steps.gate.outputs.introduced }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run the gate
+      id: gate
+      shell: bash
+      run: |
+        set -o pipefail
+        args=(ci "${{ inputs.path }}" --baseline "${{ inputs.baseline }}" --policy "${{ inputs.policy }}")
+        [ "${{ inputs.include-library-surface }}" = "true" ] && args+=(--include-library-surface)
+        [ "${{ inputs.binaries }}" = "false" ] && args+=(--no-binaries)
+
+        # Capture the machine-readable result before the human-readable run, so
+        # the outputs are set even when the gate fails and the step exits 1.
+        assay "${args[@]}" --json > "$RUNNER_TEMP/assay-gate.json" || true
+        node -e '
+          const r = require(process.env.RUNNER_TEMP + "/assay-gate.json");
+          const out = require("fs");
+          out.appendFileSync(process.env.GITHUB_OUTPUT, `passed=${r.passed}\nintroduced=${r.introduced.length}\n`);
+          const lines = ["## Assay", "", r.summary, ""];
+          for (const f of r.introduced.slice(0, 25)) {
+            lines.push(`- **${f.assetName}** — ${f.track.toLowerCase()}, ${f.controlClass}, slack ${f.slackYears}y, reached ${f.reachedVia.toLowerCase().replace(/_/g, " ")}`);
+          }
+          for (const s of r.expired) {
+            lines.push(`- suppression expired ${s.expiresAt.slice(0,10)}: ${s.reason} (${s.approvedBy})`);
+          }
+          out.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+        '
+
+        if [ -n "${{ inputs.cbom }}" ]; then
+          assay scan "${{ inputs.path }}" --policy "${{ inputs.policy }}" --out "${{ inputs.cbom }}"
+        fi
+
+        assay "${args[@]}"

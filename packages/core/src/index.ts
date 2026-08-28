@@ -11,3 +11,4 @@ export * from './rank/index.js';
 export * from './cbom/index.js';
 export * from './diff/index.js';
 export * from './explain/index.js';
+export * from './baseline/index.js';

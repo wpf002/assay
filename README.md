@@ -110,7 +110,8 @@ packages/
                    worklists, CycloneDX export. no I/O, no clock, no deps.
   policy/          versioned deadline/CRQC packs
   scope/           signed authorization grants for network detectors
-  detect-source/   tree-sitter AST + config parsing (nginx, openssl.cnf, java.security)
+  detect-source/   tree-sitter AST for 10 languages + config parsing
+                   (nginx, openssl.cnf, java.security, sshd_config)
   detect-deps/     manifest -> known crypto capability surface
   detect-network/  TLS/SSH capability enumeration. scope-gated at the type level.
   detect-pki/      X.509 inventory, lifetime vs migration window
@@ -150,6 +151,12 @@ Scan a repo and push the evidence:
 
 ```bash
 pnpm assay push ./path/to/repo --system payments-api
+```
+
+Gate a build on newly introduced cryptography:
+
+```bash
+pnpm assay ci . --baseline .assay-baseline.json
 ```
 
 Then open http://localhost:3000. Only evidence is stored; the ranking is computed on read, so switching policy packs re-ranks live and marks every row that moved.
@@ -192,7 +199,7 @@ Discovery is table stakes and several of these do it competently. The gap Assay 
 
 ## Status
 
-Phases 0 through 5 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
+Phases 0 through 6 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
 
 Phase 1's exit gate was a kill condition, and it passed: two disjoint hand-verified samples across django, Ghost and n8n scored 96.7% and 100% precision at `CONFIRMED`, and 834k LOC of n8n reduced to eleven work items. Details, including what the run does *not* establish, are in [VALIDATION.md](VALIDATION.md). Phase 2 added the scope gate, certificate inventory with a lifetime-vs-deadline check, TLS/SSH capability enumeration, and cloud key-store classification. Its exit gate — that an out-of-scope probe fails at the type level rather than at runtime — is asserted by a compile-time test that runs under `tsc` in CI.
 
@@ -200,4 +207,8 @@ Phase 4 added the API, Postgres persistence, scan diff, ticket export, and the w
 
 Phase 5 added binary analysis: imported symbol tables, byte-exact algorithm constants in both byte orders, embedded certificates and keys found by DER parsing rather than string matching, and library version fingerprints. Its exit gate — that a string match can never confirm on its own — holds by arithmetic rather than by a special case.
 
-Next is Phase 6, language expansion and CI integration — see [ROADMAP.md](ROADMAP.md).
+Phase 6 added Go, Java, C, C++, Rust and C#, plus the build gate: `assay ci` fails only on work that is *new* relative to a committed baseline, and suppressions carry a mandatory expiry that `--update-baseline` refuses to renew silently.
+
+Assay gates itself. Its own estate is one finding — the Ed25519 keypair `@assay/scope` uses to sign grants, which is Shor-broken and sits in the committed baseline rather than being hidden.
+
+Next is Phase 7, vendor attestation — see [ROADMAP.md](ROADMAP.md).

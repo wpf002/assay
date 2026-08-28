@@ -1,0 +1,27 @@
+name: assay
+on: { push: { branches: [main] }, pull_request: {} }
+
+jobs:
+  cryptographic-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      # Assay scanning its own repository. The baseline is committed, so this
+      # fails only when a change introduces new reachable quantum-vulnerable
+      # cryptography - not on the estate that was already here.
+      - name: Cryptographic gate
+        run: node apps/cli/dist/index.js ci . --baseline .assay-baseline.json
+
+      - name: Publish the CBOM
+        if: always()
+        run: node apps/cli/dist/index.js scan . --out cbom.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: cbom, path: cbom.json }

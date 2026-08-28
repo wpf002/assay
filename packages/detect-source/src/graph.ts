@@ -201,6 +201,21 @@ export function functionsAt(root: Parser.SyntaxNode, lang: Lang, line: number): 
 /* ------------------------------------------------------------------ helpers */
 
 function functionName(node: Parser.SyntaxNode, lang: Lang): string | null {
+  switch (node.type) {
+    case 'function_declaration': // go, ts
+    case 'method_declaration': // go, java, c#
+    case 'function_item': // rust
+    case 'function_definition': // python, c, cpp
+    case 'constructor_declaration':
+    case 'local_function_statement':
+      return (
+        node.childForFieldName('name')?.text ??
+        node.childForFieldName('declarator')?.text.replace(/\(.*$/, '').trim() ??
+        null
+      );
+    default:
+      break;
+  }
   if (lang === 'python') {
     if (node.type === 'function_definition') return node.childForFieldName('name')?.text ?? null;
     if (node.type === 'class_definition') return node.childForFieldName('name')?.text ?? null;
@@ -277,10 +292,22 @@ function classify(spec: string, from: string, local: string[], external: string[
 
 const HTTP_SERVER =
   /\.listen\s*\(|createServer\s*\(|app\.(get|post|put|delete|patch|use)\s*\(|new\s+Hono\s*\(|fastify\s*\(/;
+
+/** `func main()`, `int main(`, `fn main()`, `public static void main`, `static ... Main(`. */
+const NATIVE_MAIN =
+  /\bfunc\s+main\s*\(|\bfn\s+main\s*\(|\bint\s+main\s*\(|public\s+static\s+void\s+main\s*\(|static\s+(?:async\s+)?(?:void|int|Task)\s+Main\s*\(/;
+
+const NATIVE_SERVER =
+  /http\.ListenAndServe|gin\.Default|echo\.New|net\.Listen|SpringApplication\.run|@RestController|actix_web::HttpServer|axum::Server|rocket::build|WebApplication\.CreateBuilder|app\.MapGet/;
 const PY_APP = /Flask\s*\(|FastAPI\s*\(|urlpatterns\s*=|application\s*=\s*get_[wa]sgi_application/;
 
 function detectEntry(file: string, source: string, lang: Lang): EntryKind | null {
   const f = file.replace(/\\/g, '/');
+  if (lang === 'go' || lang === 'java' || lang === 'c' || lang === 'cpp' || lang === 'rust' || lang === 'csharp') {
+    if (NATIVE_SERVER.test(source)) return 'framework-route';
+    if (NATIVE_MAIN.test(source)) return 'package-main';
+    return null;
+  }
   if (lang === 'python') {
     if (/(^|\/)(wsgi|asgi|manage)\.py$/.test(f)) return 'python-wsgi';
     if (/if\s+__name__\s*==\s*['"]__main__['"]/.test(source)) return 'python-main';

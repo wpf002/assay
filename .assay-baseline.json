@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "createdAt": "2026-08-28T00:00:00.000Z",
+  "systemName": "assay",
+  "policyPackId": "eo-14412",
+  "policyPackVersion": "1.0.0",
+  "accepted": [
+    "5fc46302835dce196bf512fc"
+  ],
+  "suppressions": []
+}

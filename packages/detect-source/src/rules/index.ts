@@ -1,8 +1,9 @@
 import type { Lang, Rule } from '../types.js';
 import { TYPESCRIPT_RULES } from './typescript.js';
 import { PYTHON_RULES } from './python.js';
+import { SYSTEMS_RULES } from './systems.js';
 
-export const RULES: readonly Rule[] = [...TYPESCRIPT_RULES, ...PYTHON_RULES];
+export const RULES: readonly Rule[] = [...TYPESCRIPT_RULES, ...PYTHON_RULES, ...SYSTEMS_RULES];
 
 /** Method-name index. Dispatch is O(1) per call site rather than O(rules). */
 export function ruleIndex(lang: Lang): ReadonlyMap<string, readonly Rule[]> {
@@ -18,5 +19,5 @@ export function ruleIndex(lang: Lang): ReadonlyMap<string, readonly Rule[]> {
   return index;
 }
 
-export { TYPESCRIPT_RULES, PYTHON_RULES };
+export { TYPESCRIPT_RULES, PYTHON_RULES, SYSTEMS_RULES };
 export type { Rule };

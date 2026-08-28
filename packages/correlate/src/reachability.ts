@@ -291,7 +291,10 @@ function isLocallyLive(node: ModuleNode, evidence: Evidence): boolean {
 
 /* --------------------------------------------------------------- graph walk */
 
-const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.py'];
+const EXTENSIONS = [
+  '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs',
+  '.py', '.go', '.java', '.rs', '.cs', '.c', '.cc', '.cpp', '.h', '.hpp',
+];
 
 function resolve(spec: string, graph: ModuleGraph): string | null {
   if (graph.nodes.has(spec)) return spec;

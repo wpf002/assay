@@ -2,6 +2,12 @@ import Parser from 'tree-sitter';
 import TypeScript from 'tree-sitter-typescript';
 import JavaScript from 'tree-sitter-javascript';
 import Python from 'tree-sitter-python';
+import Go from 'tree-sitter-go';
+import Java from 'tree-sitter-java';
+import C from 'tree-sitter-c';
+import Cpp from 'tree-sitter-cpp';
+import Rust from 'tree-sitter-rust';
+import CSharp from 'tree-sitter-c-sharp';
 import type { Arg, CallSite, FileContext, Lang } from '../types.js';
 
 /**
@@ -19,7 +25,29 @@ const GRAMMARS: Readonly<Record<Lang, unknown>> = {
   tsx: TypeScript.tsx,
   javascript: JavaScript,
   python: Python,
+  go: Go,
+  java: Java,
+  c: C,
+  cpp: Cpp,
+  rust: Rust,
+  csharp: CSharp,
 };
+
+/**
+ * Call-expression node types across ten grammars.
+ *
+ * Each language names the same idea differently, and a rule set that only
+ * knows `call_expression` silently finds nothing in Java or C#. Keeping the
+ * set in one place is what lets one walker serve all of them.
+ */
+const CALL_NODES = new Set([
+  'call_expression', // ts/js, go, c, cpp, rust
+  'call', // python
+  'method_invocation', // java
+  'object_creation_expression', // java: new Cipher(...)
+  'invocation_expression', // c#
+  'macro_invocation', // rust
+]);
 
 const parsers = new Map<Lang, Parser>();
 
@@ -43,6 +71,17 @@ const EXTENSIONS: Readonly<Record<string, Lang>> = {
   '.jsx': 'javascript',
   '.py': 'python',
   '.pyi': 'python',
+  '.go': 'go',
+  '.java': 'java',
+  '.c': 'c',
+  '.h': 'c',
+  '.cc': 'cpp',
+  '.cpp': 'cpp',
+  '.cxx': 'cpp',
+  '.hpp': 'cpp',
+  '.hh': 'cpp',
+  '.rs': 'rust',
+  '.cs': 'csharp',
 };
 
 export function languageFor(file: string): Lang | null {
@@ -69,9 +108,11 @@ export function parseSource(file: string, source: string, lang: Lang): ParsedFil
     const node = stack.pop() as Parser.SyntaxNode;
 
     if (lang === 'python') collectPythonImports(node, imports, aliases);
-    else collectJsImports(node, imports, aliases);
+    else if (lang === 'typescript' || lang === 'tsx' || lang === 'javascript') {
+      collectJsImports(node, imports, aliases);
+    } else collectOtherImports(node, imports, aliases);
 
-    if (node.type === 'call_expression' || node.type === 'call') {
+    if (CALL_NODES.has(node.type)) {
       const call = toCallSite(node, file, lang);
       if (call) calls.push(call);
     }
@@ -92,19 +133,45 @@ function dottedName(node: Parser.SyntaxNode | null): string | null {
     case 'identifier':
     case 'property_identifier':
     case 'shorthand_property_identifier':
+    case 'field_identifier':
+    case 'type_identifier':
+    case 'package_identifier':
       return node.text;
     case 'member_expression':
-    case 'attribute': {
-      const object = node.childForFieldName('object');
-      const property = node.childForFieldName('property') ?? node.childForFieldName('attribute');
+    case 'attribute':
+    case 'selector_expression': // go
+    case 'field_expression': // c, cpp, rust
+    case 'scoped_identifier': // rust, java
+    case 'qualified_identifier': // cpp
+    case 'member_access_expression': // c#
+    case 'scoped_type_identifier': {
+      const object =
+        node.childForFieldName('object') ??
+        node.childForFieldName('operand') ??
+        node.childForFieldName('argument') ??
+        node.childForFieldName('path') ??
+        node.childForFieldName('scope') ??
+        node.childForFieldName('expression');
+      const property =
+        node.childForFieldName('property') ??
+        node.childForFieldName('attribute') ??
+        node.childForFieldName('field') ??
+        node.childForFieldName('name');
       const left = dottedName(object);
       const right = property ? property.text : null;
-      return left && right ? `${left}.${right}` : right;
+      return left && right ? `${left}.${right}` : (right ?? left);
     }
     case 'call_expression':
-    case 'call': {
+    case 'call':
+    case 'method_invocation':
+    case 'invocation_expression':
+    case 'macro_invocation': {
       // `require('crypto').createHash` - keep the tail, drop the call.
-      return dottedName(node.childForFieldName('function'));
+      return dottedName(
+        node.childForFieldName('function') ??
+          node.childForFieldName('macro') ??
+          node.childForFieldName('name'),
+      );
     }
     default:
       return null;
@@ -112,11 +179,27 @@ function dottedName(node: Parser.SyntaxNode | null): string | null {
 }
 
 function toCallSite(node: Parser.SyntaxNode, file: string, lang: Lang): CallSite | null {
-  const fn = node.childForFieldName('function');
-  const callee = dottedName(fn);
+  // Java splits the receiver and the method into separate fields; C# and Rust
+  // use different names again. Reconstruct the dotted callee from whichever
+  // this grammar provides.
+  let callee: string | null;
+  if (node.type === 'method_invocation') {
+    const object = dottedName(node.childForFieldName('object'));
+    const name = node.childForFieldName('name')?.text ?? null;
+    callee = object && name ? `${object}.${name}` : name;
+  } else if (node.type === 'object_creation_expression') {
+    const type = dottedName(node.childForFieldName('type'));
+    callee = type === null ? null : `new.${type}`;
+  } else {
+    callee = dottedName(
+      node.childForFieldName('function') ??
+        node.childForFieldName('macro') ??
+        node.childForFieldName('name'),
+    );
+  }
   if (!callee) return null;
 
-  const argsNode = node.childForFieldName('arguments');
+  const argsNode = node.childForFieldName('arguments') ?? node.childForFieldName('argument_list');
   const positional: Arg[] = [];
   const kwargs: Record<string, Arg> = {};
 
@@ -125,6 +208,13 @@ function toCallSite(node: Parser.SyntaxNode, file: string, lang: Lang): CallSite
       const child = argsNode.namedChild(i);
       if (!child) continue;
       if (child.type === 'comment') continue;
+      // C# wraps each argument in an `argument` node; Rust and Java do not.
+      // Unwrapping here keeps every rule free of grammar trivia.
+      if (child.type === 'argument') {
+        const inner = child.namedChild(0);
+        positional.push(inner === null ? toArg(child) : toArg(inner));
+        continue;
+      }
       if (lang === 'python' && child.type === 'keyword_argument') {
         const name = child.childForFieldName('name');
         const value = child.childForFieldName('value');
@@ -157,7 +247,12 @@ function toArg(node: Parser.SyntaxNode, keyword?: string): Arg {
 
   switch (node.type) {
     case 'string':
-    case 'template_string': {
+    case 'template_string':
+    case 'string_literal':
+    case 'interpreted_string_literal':
+    case 'raw_string_literal':
+    case 'char_literal':
+    case 'verbatim_string_literal': {
       const s = stringValue(node);
       return s === null
         ? { kind: 'unresolved', ...base, ...kw }
@@ -165,15 +260,23 @@ function toArg(node: Parser.SyntaxNode, keyword?: string): Arg {
     }
     case 'number':
     case 'integer':
-    case 'float': {
+    case 'float':
+    case 'int_literal':
+    case 'float_literal':
+    case 'number_literal':
+    case 'integer_literal':
+    case 'decimal_integer_literal':
+    case 'hex_integer_literal': {
       const n = Number(node.text.replace(/_/g, ''));
       return Number.isFinite(n)
         ? { kind: 'number', number: n, ...base, ...kw }
         : { kind: 'unresolved', ...base, ...kw };
     }
     case 'true':
+    case 'true_literal':
       return { kind: 'boolean', boolean: true, ...base, ...kw };
     case 'false':
+    case 'false_literal':
       return { kind: 'boolean', boolean: false, ...base, ...kw };
     case 'unary_expression': {
       const inner = node.namedChild(0);
@@ -195,9 +298,16 @@ function toArg(node: Parser.SyntaxNode, keyword?: string): Arg {
       return { kind: 'array', array: items, ...base, ...kw };
     }
     case 'call_expression':
-    case 'call': {
-      const callee = dottedName(node.childForFieldName('function'));
-      const inner = node.childForFieldName('arguments');
+    case 'call':
+    case 'method_invocation':
+    case 'invocation_expression':
+    case 'macro_invocation': {
+      const callee = dottedName(
+        node.childForFieldName('function') ??
+          node.childForFieldName('macro') ??
+          node.childForFieldName('name'),
+      );
+      const inner = node.childForFieldName('arguments') ?? node.childForFieldName('argument_list');
       const items: Arg[] = [];
       if (inner) {
         for (let i = 0; i < inner.namedChildCount; i++) {
@@ -323,6 +433,48 @@ function bindPattern(node: Parser.SyntaxNode, mod: string, aliases: Map<string, 
     } else {
       bindPattern(c, mod, aliases);
     }
+  }
+}
+
+/**
+ * Go, Java, C/C++, Rust and C# imports.
+ *
+ * Import gating is the single largest lever on precision in every language:
+ * `Cipher.getInstance("DES")` is a finding only when javax.crypto is in
+ * scope, and a local class called Cipher is not.
+ */
+function collectOtherImports(
+  node: Parser.SyntaxNode,
+  imports: Set<string>,
+  aliases: Map<string, string>,
+): void {
+  const record = (spec: string): void => {
+    const clean = spec.replace(/^["'<]|[">']$/g, '').trim();
+    if (clean === '') return;
+    imports.add(clean);
+    const last = clean.split(/[/.:]/).filter(Boolean).pop();
+    if (last !== undefined) aliases.set(last.replace(/\.[ch]pp?$/, ''), clean);
+  };
+
+  switch (node.type) {
+    case 'import_spec': // go
+    case 'import_declaration': // go, java
+    case 'use_declaration': // rust
+    case 'using_directive': { // c#
+      record(node.text.replace(/^(import|use|using)\s+/, '').replace(/;$/, ''));
+      // A Go import spec may be aliased: `crypto "crypto/rsa"`.
+      const name = node.childForFieldName('name');
+      const path = node.childForFieldName('path');
+      if (name && path) aliases.set(name.text, path.text.replace(/^"|"$/g, ''));
+      return;
+    }
+    case 'preproc_include': { // c, cpp
+      const path = node.childForFieldName('path');
+      if (path) record(path.text);
+      return;
+    }
+    default:
+      return;
   }
 }
 

@@ -6,7 +6,7 @@ import { analyzeReachability, assemble, divergences } from '@assay/correlate';
 import { scanSource } from '@assay/detect-source';
 import { scanDependencies } from '@assay/detect-deps';
 import { decimalYear, loadPack } from '@assay/policy';
-import { rank, toCycloneDX } from '@assay/core';
+import { evaluateGate, makeBaseline, rank, toCycloneDX } from '@assay/core';
 
 /**
  * Phase 1 end to end: a real tree on disk -> evidence -> occurrences ->
@@ -203,4 +203,48 @@ describe('phase 3: reachability on the fixture tree', () => {
     // real divergence set requires a probe. Assert the shape, not a count.
     expect(Array.isArray(divergences(occurrences, assets))).toBe(true);
   });
+});
+
+describe('phase 6: the CI gate', () => {
+  it('blocks only new work, and treats the existing estate as accepted', async () => {
+    const { worklists } = await scan();
+    const gateOpts = { now: NOW };
+
+    // No baseline: everything confirmed and reachable is new by definition.
+    const cold = evaluateGate(worklists, null, gateOpts);
+    expect(cold.passed).toBe(false);
+    expect(cold.introduced.length).toBeGreaterThan(0);
+
+    // Accept it, and the same scan passes.
+    const baseline = makeBaseline(
+      worklists,
+      { systemName: 'sample', createdAt: COLLECTED },
+      gateOpts,
+    );
+    expect(evaluateGate(worklists, baseline, gateOpts).passed).toBe(true);
+  });
+
+  it('never blocks on an unreached or merely observed finding', async () => {
+    const { worklists } = await scan();
+    const blocking = evaluateGate(worklists, null, { now: NOW }).introduced;
+    expect(blocking.every((f) => f.assertionLevel === 'CONFIRMED')).toBe(true);
+    expect(blocking.every((f) => f.reachable === true)).toBe(true);
+  });
+
+  it('gates this repository itself, which is the only honest way to ship one', async () => {
+    // Assay's own estate: the Ed25519 keypair it uses to sign scope grants.
+    // Shor-broken, on the authenticity track, and correctly found by the tool
+    // in its own source.
+    const repoRoot = resolve(__dirname, '../../..');
+    const src = await scanSource({ root: repoRoot, systemId: 'assay', collectedAt: COLLECTED });
+    const assembled = assemble(src.findings);
+    const reachability = analyzeReachability(assembled.occurrences, src.graph);
+    const w = rank(reachability.occurrences, assembled.assets, {
+      policy: loadPack('eo-14412'),
+      currentYear: decimalYear(NOW),
+      secrecyLifetime: () => ({ years: 5, assumed: true }),
+    });
+    const blocking = evaluateGate(w, null, { now: NOW }).introduced;
+    expect(blocking.some((f) => f.assetName.includes('EdDSA'))).toBe(true);
+  }, 180_000);
 });

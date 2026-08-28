@@ -24,7 +24,8 @@ describe('language dispatch', () => {
     expect(languageFor('a.tsx')).toBe('tsx');
     expect(languageFor('a.mjs')).toBe('javascript');
     expect(languageFor('a.py')).toBe('python');
-    expect(languageFor('a.rs')).toBeNull();
+    expect(languageFor('a.rs')).toBe('rust');
+    expect(languageFor('a.txt')).toBeNull();
   });
 });
 

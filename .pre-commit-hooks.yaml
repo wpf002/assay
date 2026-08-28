@@ -1,0 +1,12 @@
+- id: assay
+  name: assay cryptographic gate
+  description: >-
+    Fail the commit when it introduces new confirmed, reachable,
+    quantum-vulnerable cryptography. Existing findings are accepted via a
+    committed baseline; only new work blocks.
+  entry: assay ci . --baseline .assay-baseline.json
+  language: node
+  pass_filenames: false
+  # Every supported language, because a gate that only watches TypeScript
+  # misses the payments core.
+  types_or: [ts, tsx, javascript, python, go, java, c, c++, rust, c#]

@@ -1,6 +1,30 @@
 import type { Primitive, Purpose } from '@assay/core';
 
-export type Lang = 'typescript' | 'tsx' | 'javascript' | 'python';
+export type Lang =
+  | 'typescript'
+  | 'tsx'
+  | 'javascript'
+  | 'python'
+  | 'go'
+  | 'java'
+  | 'c'
+  | 'cpp'
+  | 'rust'
+  | 'csharp';
+
+/** Languages whose call syntax and import forms are close enough to share a walker. */
+export const ALL_LANGS: readonly Lang[] = [
+  'typescript',
+  'tsx',
+  'javascript',
+  'python',
+  'go',
+  'java',
+  'c',
+  'cpp',
+  'rust',
+  'csharp',
+];
 
 /** A literal argument the parser was able to resolve. `unresolved` is honest, not a failure. */
 export interface Arg {

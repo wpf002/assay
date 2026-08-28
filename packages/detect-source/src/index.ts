@@ -62,7 +62,7 @@ export async function scanSource(opts: SourceScanOptions): Promise<SourceScanRes
 
   const files = await fg(
     [
-      '**/*.{ts,tsx,mts,cts,js,mjs,cjs,jsx,py,pyi}',
+      '**/*.{ts,tsx,mts,cts,js,mjs,cjs,jsx,py,pyi,go,java,c,h,cc,cpp,cxx,hpp,hh,rs,cs}',
       '**/package.json',
       '**/pyproject.toml',
       '**/setup.py',
@@ -194,7 +194,7 @@ export async function scanSource(opts: SourceScanOptions): Promise<SourceScanRes
   };
 }
 
-const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.py'];
+const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.py', '.go', '.java', '.rs', '.cs', '.c', '.cc', '.cpp', '.h', '.hpp'];
 
 /** Resolve an extensionless or dist-pointing hint onto a file we actually parsed. */
 export function resolveInTree(hint: string, nodes: ReadonlyMap<string, unknown>): string | null {
