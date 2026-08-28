@@ -121,7 +121,7 @@ packages/
   attest/          vendor questionnaires: claims at 0.40, and the date that drives Y
 apps/
   api/             Fastify + Prisma + Postgres. Ranks on read; never re-derives confidence.
-  web/             Next.js. Two worklists, live policy switcher, derivation drill-down.
+  web/             Vite + React SPA. Two worklists, live policy switcher, drill-down.
   cli/             primary interface. CI-integrable.
 ```
 

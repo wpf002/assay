@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { getDerivation, type Derivation, type RankedFinding } from '@/lib/api';
 import { Timeline } from './Timeline';

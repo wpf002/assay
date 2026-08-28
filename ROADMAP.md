@@ -235,10 +235,12 @@ Where the product becomes worth money.
 
 - Fastify routes: scans, systems, occurrences, CBOM export
 - Scan diff — what appeared, what got remediated, what regressed. Versioned report slots as the diff primitive.
-- Web: two ranked worklists (confidentiality, authenticity), `Factor`-tree drill-down on every number, confidence panel showing what was suppressed, deadline timeline per row against the EO markers, policy pack switcher that re-ranks live with per-row diff badges
+- Web (Vite + React, static build): two ranked worklists (confidentiality, authenticity), `Factor`-tree drill-down on every number, confidence panel showing what was suppressed, deadline timeline per row against the EO markers, policy pack switcher that re-ranks live with per-row diff badges
 - Exactly one headline number, derived and clickable
 - Jira / ServiceNow export — a worklist that cannot leave the tool does not get worked
 - `assay push` ships evidence to the API; only evidence crosses the wire, never a ranking
+
+**On the web framework.** It is a plain Vite + React SPA, not a framework with a hosting vendor attached. `vite build` produces static files any web server can serve, and the API base URL is resolved at runtime rather than baked into the bundle, so one build works against localhost, staging, or an air-gapped internal host. The first cut used Next.js as the roadmap originally specified; the Vercel GitHub App detected it and emailed the repository owner offering to deploy it, which is the wrong default for a tool whose whole point is running inside someone's perimeter.
 
 **Not done, deliberately:** hosting. This is a pre-alpha tool with a kill gate two phases back; putting it behind a URL is not a development step. The Docker Compose file and the Prisma migration are the deployment surface for now.
 

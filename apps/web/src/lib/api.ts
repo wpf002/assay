@@ -3,7 +3,13 @@
  * switcher is that the numbers move when the policy does, and a cached
  * worklist would silently show yesterday's deadline.
  */
-export const API = process.env['NEXT_PUBLIC_ASSAY_API'] ?? 'http://localhost:3001';
+/**
+ * Empty by default: the dev server proxies /api to the API, and a production
+ * build is served from the same origin as it. Nothing about the deployment is
+ * baked into the bundle, so one build works against localhost, staging, or an
+ * air-gapped internal host.
+ */
+export const API = import.meta.env['VITE_ASSAY_API'] ?? '/api';
 
 export interface ScanSummary {
   id: string;
