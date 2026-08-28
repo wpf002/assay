@@ -65,6 +65,8 @@ export interface PolicyPack {
   regulatoryDeadlines: { CONFIDENTIALITY: number | null; AUTHENTICITY: number | null };
   regulatoryAuthority: string | null;
   caveats: string[];
+  trust: 'SIGNED' | 'UNSIGNED' | 'UNTRUSTED';
+  trustReason: string;
 }
 
 export interface ExplainNode {

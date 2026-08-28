@@ -11,3 +11,6 @@ coverage/
 scan-output/
 .DS_Store
 cbom.json
+
+# The pack signing key. Whoever holds it publishes horizons; it is not a build input.
+packages/policy/keys/*.key.pem

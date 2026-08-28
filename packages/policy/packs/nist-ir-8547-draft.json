@@ -14,10 +14,15 @@
   "migrationYearsByControl": {
     "SELF": 0.5,
     "VENDOR_UPGRADEABLE": 1.5,
-    "VENDOR_LOCKED": 4.0,
-    "HARDWARE": 6.0,
-    "PROTOCOL_BILATERAL": 5.0
+    "VENDOR_LOCKED": 4,
+    "HARDWARE": 6,
+    "PROTOCOL_BILATERAL": 5
   },
-  "sources": ["NIST IR 8547 initial public draft"],
-  "caveats": ["Verify against the current published revision before relying on a ranking."]
+  "sources": [
+    "NIST IR 8547 initial public draft"
+  ],
+  "caveats": [
+    "Verify against the current published revision before relying on a ranking."
+  ],
+  "signature": "NRLlALN4BODCjkizSpPW61lSw6Hn+eX1+ziVbLmPOgYetz4xbQlpLPUBn0G5x6fRRME2A207IJk3/Z7QFKyqDg=="
 }

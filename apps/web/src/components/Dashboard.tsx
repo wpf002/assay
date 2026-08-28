@@ -105,6 +105,7 @@ export function Dashboard({
             {packs.map((p) => (
               <option key={p.packId} value={p.packId}>
                 {p.title}
+                {p.trust === 'SIGNED' ? '' : ` (${p.trust.toLowerCase()})`}
               </option>
             ))}
           </select>
@@ -180,6 +181,14 @@ export function Dashboard({
             {worklists.unanalyzed.length > 0 &&
               ` ${worklists.unanalyzed.length} finding(s) have no call site to trace — "not looked at" is not "not reached".`}
           </p>
+
+          {activePack !== null && activePack.trust !== 'SIGNED' && (
+            <p className="caveat" style={{ color: 'var(--late)' }}>
+              This pack&rsquo;s horizon is {activePack.trust.toLowerCase()}: {activePack.trustReason}.
+              The arithmetic is unchanged, but these slack figures are not comparable with a
+              ranking produced under a signed pack.
+            </p>
+          )}
 
           {activePack !== null && activePack.caveats.length > 0 && (
             <p className="caveat">

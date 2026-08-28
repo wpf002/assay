@@ -28,6 +28,13 @@ import { trackFor, type ControlClass, type Purpose, type UrgencyTrack } from '..
 export interface MoscaPolicy {
   readonly packId: string;
   readonly packVersion: string;
+  /**
+   * Whether the horizon in this pack is attributable to a publisher
+   * (decision D3). An unsigned or edited horizon still ranks, but it enters
+   * the derivation as an ASSUMPTION rather than a POLICY, so a reader can see
+   * that this finding is not comparable with one ranked under a signed pack.
+   */
+  readonly trust?: 'SIGNED' | 'UNSIGNED' | 'UNTRUSTED';
   /** Decimal year at which a CRQC is assumed to exist. Policy input, not a truth claim. */
   readonly crqcYear: number;
   readonly deprecateYear: number;
@@ -161,6 +168,12 @@ export function scoreMosca(input: MoscaInput): MoscaResult {
           ],
         };
 
+  // A horizon nobody signed is an opinion, and the tree says so.
+  const horizonKind: Factor['kind'] =
+    policy.trust === undefined || policy.trust === 'SIGNED' ? 'POLICY' : 'ASSUMPTION';
+  const trustSuffix =
+    horizonKind === 'POLICY' ? '' : ` [${policy.trust ?? 'UNSIGNED'}: horizon not attributable]`;
+
   const crqcFactor: Factor = {
     kind: 'INFERENCE',
     label: 'slack under CRQC horizon (Z - (X + Y))',
@@ -169,7 +182,11 @@ export function scoreMosca(input: MoscaInput): MoscaResult {
     sources: [
       xFactor,
       yFactor,
-      leaf('POLICY', `Z CRQC year ${policy.crqcYear} @ ${policy.packId}@${policy.packVersion}`, zCrqc),
+      leaf(
+        horizonKind,
+        `Z CRQC year ${policy.crqcYear} @ ${policy.packId}@${policy.packVersion}${trustSuffix}`,
+        zCrqc,
+      ),
     ],
   };
 
@@ -183,10 +200,10 @@ export function scoreMosca(input: MoscaInput): MoscaResult {
       sources: [
         yFactor,
         leaf(
-          'POLICY',
+          horizonKind,
           `D deadline ${regulatory.deadlineYear} for ${track} per ${
             policy.regulatoryAuthority ?? 'unattributed policy'
-          } @ ${policy.packId}@${policy.packVersion}`,
+          } @ ${policy.packId}@${policy.packVersion}${trustSuffix}`,
           regulatory.horizonYears,
         ),
       ],

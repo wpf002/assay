@@ -68,6 +68,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
         regulatoryDeadlines: p.regulatoryDeadlines,
         regulatoryAuthority: p.regulatoryAuthority,
         migrationYearsByControl: p.migrationYearsByControl,
+        // D3: a horizon nobody signed still ranks, and the UI says so.
+        trust: p.trust,
+        trustReason: p.trustReason,
         // Shipped figures are inputs, not truth claims, and the UI says so.
         caveats: p.caveats,
         sources: p.sources,

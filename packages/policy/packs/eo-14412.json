@@ -7,16 +7,16 @@
   "deprecateYear": 2030,
   "disallowYear": 2035,
   "regulatoryDeadlines": {
-    "CONFIDENTIALITY": 2031.0,
-    "AUTHENTICITY": 2032.0
+    "CONFIDENTIALITY": 2031,
+    "AUTHENTICITY": 2032
   },
   "regulatoryAuthority": "EO 14412 sec. 4 - key establishment by 2030-12-31, digital signatures by 2031-12-31, for HVAs and high-impact systems; FAR rule extends to covered contractors by 2030-12-31",
   "migrationYearsByControl": {
     "SELF": 0.5,
     "VENDOR_UPGRADEABLE": 1.5,
-    "VENDOR_LOCKED": 4.0,
-    "HARDWARE": 6.0,
-    "PROTOCOL_BILATERAL": 5.0
+    "VENDOR_LOCKED": 4,
+    "HARDWARE": 6,
+    "PROTOCOL_BILATERAL": 5
   },
   "sources": [
     "https://www.presidency.ucsb.edu/documents/executive-order-14412-securing-the-nation-against-advanced-cryptographic-attacks",
@@ -26,5 +26,6 @@
     "Deadline dates are expressed as decimal years: 2031.0 means 'complete before 2031 begins', i.e. the 2030-12-31 deadline.",
     "Sources disagree on which FAR rule falls at 180 vs 270 days. Verify against the Federal Register text before relying on the procurement dates.",
     "CISA minimum-elements guidance for CBOMs (sec. 5(d), due ~2026-12-20) had not published when this pack was authored."
-  ]
+  ],
+  "signature": "+FaN5FsnMqUVRpsA5jHauLvigk422kuY6gDavpg/fknmuC5br8dsqm99/lwfzj//VqJYaFxH+m5sGZmXnS+sAg=="
 }

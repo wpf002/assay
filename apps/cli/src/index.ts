@@ -7,6 +7,7 @@ import { keygen, sign, verify } from './commands/scope.js';
 import { runPush } from './commands/push.js';
 import { runCi } from './commands/ci.js';
 import { attestReconcile, attestTemplate } from './commands/attest.js';
+import { packKeygen, packSign } from './commands/policy.js';
 
 const program = new Command('assay').description(
   'Cryptographic bill of materials - discovery, inventory, migration ranking',
@@ -148,11 +149,28 @@ policy
     for (const id of listPacks()) {
       const p = loadPack(id);
       process.stdout.write(
-        `${id}@${p.packVersion}  crqc=${p.crqcYear}  ` +
+        `${id}@${p.packVersion}  ${p.trust.padEnd(9)} crqc=${p.crqcYear}  ` +
           `deadline(conf)=${p.regulatoryDeadlines.CONFIDENTIALITY ?? 'none'}  ` +
-          `deadline(auth)=${p.regulatoryDeadlines.AUTHENTICITY ?? 'none'}\n`,
+          `deadline(auth)=${p.regulatoryDeadlines.AUTHENTICITY ?? 'none'}\n` +
+          (p.trust === 'SIGNED' ? '' : `    ${p.trustReason}\n`),
       );
     }
+  });
+
+policy
+  .command('keygen')
+  .description('generate a publisher key for signing policy packs')
+  .option('--out-dir <dir>', 'where to write the keys', '.')
+  .action(async (options: { outDir: string }) => {
+    await packKeygen(options.outDir);
+  });
+
+policy
+  .command('sign <pack>')
+  .description('sign a pack file: covers the horizon and the deadlines, never the migration times')
+  .requiredOption('--key <file>', 'publisher signing key')
+  .action(async (pack: string, options: { key: string }) => {
+    await packSign(pack, options.key);
   });
 
 policy

@@ -58,6 +58,10 @@ CNSA 2.0, NIST IR 8547, EU financial-sector timelines and EO 14412 disagree, and
 pnpm assay policy list
 ```
 
+**Z is signed; Y is yours.** A pack's signature covers the CRQC horizon and the regulatory deadlines, never the migration times — an organization knows how long its own migrations take, and nobody outside the building does. Editing `migrationYearsByControl` keeps the signature valid; editing a deadline breaks it.
+
+Local packs are not forbidden, because forbidding them just makes a dissenting organization fork the tool. An unsigned horizon still ranks; its `Z` and `D` terms simply enter the derivation as `ASSUMPTION` rather than `POLICY`, so a finding that is not comparable across organizations says so on its face.
+
 **5. Presence is not exposure.**
 
 RSA in a dev dependency's test fixture and RSA on the payment API key exchange are not the same work item. Occurrences carry a reachability determination, and unreached findings are reported separately rather than padding the count. "Not yet analyzed" is a third state, never collapsed into "not reached."
