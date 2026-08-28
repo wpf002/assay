@@ -51,6 +51,7 @@ const occ = (id: string, assetId: string, o: Partial<Occurrence> = {}): Occurren
 
 const reach = (reachable: boolean): Occurrence['reachability'] => ({
   reachable,
+  via: reachable ? 'ENTRY_POINT' : 'NONE',
   entryPoint: reachable ? 'http:GET /' : null,
   path: [],
   factor: { kind: 'INFERENCE', label: 'reachability', value: reachable, weight: 1, sources: [] },

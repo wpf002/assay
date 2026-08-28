@@ -122,6 +122,7 @@ describe('CycloneDX export', () => {
       occ('o1', [ev('SOURCE_AST', 'a.ts:12')], {
         reachability: {
           reachable: true,
+          via: 'ENTRY_POINT',
           entryPoint: 'http:POST /v1/payments',
           path: [
             { module: 'api', function: 'handler', fullFilename: 'src/api.ts', line: 4 },
