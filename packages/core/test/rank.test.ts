@@ -132,14 +132,34 @@ describe('headline metric', () => {
   });
 
   it('counts only CONFIRMED findings', () => {
-    const weak = occ('weak', KEX.id, {
-      evidence: [ev('BINARY_STRING')],
-      confidence: computeConfidence([ev('BINARY_STRING')]),
+    const observed = occ('observed', KEX.id, {
+      evidence: [ev('NETWORK_PASSIVE')],
+      confidence: computeConfidence([ev('NETWORK_PASSIVE')]),
       reachability: reach(true),
     });
-    const w = rank([weak], [KEX], OPTS);
+    const w = rank([observed], [KEX], OPTS);
     expect(w.confidentiality).toHaveLength(1);
+    expect(w.confidentiality[0]?.assertionLevel).toBe('OBSERVED');
     expect(w.headline.denominator).toBe(0);
+  });
+});
+
+describe('D1: dependency-grade evidence never leads the worklist', () => {
+  it('holds SUSPECTED findings in hints, not in either track', () => {
+    const hint = occ('dep', KEX.id, {
+      controlClass: 'VENDOR_UPGRADEABLE',
+      evidence: [ev('DEPENDENCY')],
+      confidence: computeConfidence([ev('DEPENDENCY')]),
+      reachability: reach(true),
+    });
+    const real = occ('src', KEX.id, { reachability: reach(true) });
+    const w = rank([hint, real], [KEX], OPTS);
+
+    // A vendor library has a worse Y than our own code, so sorting purely by
+    // slack would put a 0.35-confidence hint at the top of the page.
+    expect(w.hints.map((f) => f.occurrenceId)).toEqual(['dep']);
+    expect(w.confidentiality.map((f) => f.occurrenceId)).toEqual(['src']);
+    expect(w.headline.denominator).toBe(1);
   });
 });
 

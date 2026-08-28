@@ -18,6 +18,7 @@ export interface RankedFinding {
   readonly assetId: string;
   readonly systemId: string;
   readonly assetName: string;
+  readonly purpose: CryptoAsset['purpose'];
   readonly controlClass: Occurrence['controlClass'];
   readonly track: UrgencyTrack;
   readonly assertionLevel: AssertionLevel;
@@ -44,6 +45,15 @@ export interface Worklists {
   readonly unreached: readonly RankedFinding[];
   /** Reachability not yet analyzed. Distinct from "analyzed and not reached". */
   readonly unanalyzed: readonly RankedFinding[];
+  /**
+   * SUSPECTED findings - overwhelmingly dependency evidence at its 0.35 ceiling.
+   * A library implementing RSA is a place to go looking, not a work item, so
+   * these are held out of the worklists entirely (D1). They lead the list if
+   * you sort purely by slack, because a vendor library has a worse Y than your
+   * own code, which is exactly the wrong thing to put at the top of a CISO's
+   * page.
+   */
+  readonly hints: readonly RankedFinding[];
   readonly headline: HeadlineMetric;
 }
 
@@ -107,6 +117,7 @@ export function rank(
       assetId: o.assetId,
       systemId: o.systemId,
       assetName: name(asset),
+      purpose: asset.purpose,
       controlClass: o.controlClass,
       track: trackFor(asset.purpose),
       assertionLevel: g.assertionLevel,
@@ -131,9 +142,12 @@ export function rank(
           ? 1
           : 0;
 
-  const reached = findings.filter((f) => f.reachable === true).sort(bySlack);
-  const unreached = findings.filter((f) => f.reachable === false).sort(bySlack);
-  const unanalyzed = findings.filter((f) => f.reachable === null).sort(bySlack);
+  const hints = findings.filter((f) => f.assertionLevel === 'SUSPECTED').sort(bySlack);
+  const actionable = findings.filter((f) => f.assertionLevel !== 'SUSPECTED');
+
+  const reached = actionable.filter((f) => f.reachable === true).sort(bySlack);
+  const unreached = actionable.filter((f) => f.reachable === false).sort(bySlack);
+  const unanalyzed = actionable.filter((f) => f.reachable === null).sort(bySlack);
 
   // Reachability analysis is Phase 3. Until it runs, unanalyzed findings are
   // the working set - they are not silently treated as unreached, because
@@ -148,6 +162,7 @@ export function rank(
     authenticity: working.filter((f) => f.track === 'AUTHENTICITY'),
     unreached,
     unanalyzed: working === unanalyzed ? [] : unanalyzed,
+    hints,
     headline: headline(working, opts),
   };
 }

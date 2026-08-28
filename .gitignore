@@ -10,3 +10,4 @@ coverage/
 *.pcap
 scan-output/
 .DS_Store
+cbom.json

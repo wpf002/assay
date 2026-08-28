@@ -121,7 +121,7 @@ Assay records that a key exists, its algorithm, and its size. It never reads, st
 | Phase | Scope | Why here |
 |---|---|---|
 | 0 | Substrate + core engine | done |
-| 1 | Source + dependency, TS/Python | **the whole bet** |
+| 1 | Source + dependency, TS/Python | **the whole bet** — built, unvalidated |
 | 2 | Cloud KMS/PKI, then network, scope gate | adds the independent modalities I1 needs |
 | 3 | Correlation + reachability | where it becomes worth money |
 | 4 | API, persistence, web | makes the derivation clickable |
@@ -140,6 +140,8 @@ Monorepo, Prisma schema, CI, Docker Postgres. Core types committed as the archit
 ---
 
 ## 5. Phase 1 — Source + dependency detection (TypeScript, Python)
+
+**Status: implemented; exit gate not yet run.** The pipeline works end to end on a fixture repo. The three-real-repo precision measurement below has not been performed, so no precision claim is made yet.
 
 The beachhead. Every later phase is an expansion of this surface.
 

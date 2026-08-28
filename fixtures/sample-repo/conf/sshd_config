@@ -1,0 +1,4 @@
+KexAlgorithms curve25519-sha256,ecdh-sha2-nistp256,diffie-hellman-group14-sha1
+HostKeyAlgorithms ssh-rsa,ssh-ed25519,ecdsa-sha2-nistp256
+Ciphers aes256-gcm@openssh.com,aes128-ctr,3des-cbc
+MACs hmac-sha2-256,hmac-sha1

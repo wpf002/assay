@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": { "assay": "./dist/index.js" },
+  "bin": {
+    "assay": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -13,6 +15,9 @@
   "dependencies": {
     "@assay/core": "workspace:*",
     "@assay/policy": "workspace:*",
-    "commander": "^12.1.0"
+    "commander": "^12.1.0",
+    "@assay/detect-source": "workspace:*",
+    "@assay/detect-deps": "workspace:*",
+    "@assay/correlate": "workspace:*"
   }
 }

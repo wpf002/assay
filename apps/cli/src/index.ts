@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { DEFAULT_PACK_ID, listPacks, loadPack } from '@assay/policy';
+import { runScan } from './commands/scan.js';
 
 const program = new Command('assay').description(
   'Cryptographic bill of materials - discovery, inventory, migration ranking',
@@ -8,12 +9,18 @@ const program = new Command('assay').description(
 
 program
   .command('scan <path>')
-  .description('scan a repo: source AST + dependency manifests')
+  .description('scan a repo: source AST + config + dependency manifests')
   .option('--policy <pack>', 'policy pack id', DEFAULT_PACK_ID)
   .option('--out <file>', 'CBOM output path', 'cbom.json')
   .option('--profile <profile>', 'cyclonedx-1.7 | cyclonedx-1.6 | cisa-min-elements', 'cyclonedx-1.7')
-  .action(() => {
-    throw new Error('not implemented - Phase 1');
+  .option('--system <id>', 'system identifier (defaults to the directory name)')
+  .option('--secrecy-years <n>', 'years the data must stay confidential (X in Mosca)', '5')
+  .option('--include-dev', 'include devDependencies - off by default, dev tooling is not the estate')
+  .option('--include-suspected', 'export SUSPECTED findings as well')
+  .option('--json', 'emit machine-readable worklists on stdout')
+  .option('--now <iso>', 'override the current time, for reproducible runs')
+  .action(async (path: string, options) => {
+    await runScan(path, options);
   });
 
 program
@@ -32,11 +39,10 @@ policy
   .action(() => {
     for (const id of listPacks()) {
       const p = loadPack(id);
-      const kex = p.regulatoryDeadlines.CONFIDENTIALITY;
-      const sig = p.regulatoryDeadlines.AUTHENTICITY;
       process.stdout.write(
         `${id}@${p.packVersion}  crqc=${p.crqcYear}  ` +
-          `deadline(conf)=${kex ?? 'none'}  deadline(auth)=${sig ?? 'none'}\n`,
+          `deadline(conf)=${p.regulatoryDeadlines.CONFIDENTIALITY ?? 'none'}  ` +
+          `deadline(auth)=${p.regulatoryDeadlines.AUTHENTICITY ?? 'none'}\n`,
       );
     }
   });
@@ -48,4 +54,7 @@ policy
     process.stdout.write(`${JSON.stringify(loadPack(pack), null, 2)}\n`);
   });
 
-program.parse();
+program.parseAsync().catch((e: unknown) => {
+  process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
+  process.exitCode = 1;
+});
