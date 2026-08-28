@@ -28,7 +28,12 @@ const goStdlib: Rule = {
     if (!boundTo(call, ctx, ['crypto', 'golang.org/x/crypto']) && !/^(rsa|ecdsa|ed25519|ecdh|dsa|des|aes|rc4|md5|sha1|sha256|sha512|hmac|elliptic|chacha20poly1305|curve25519)\./.test(call.callee)) {
       return [];
     }
-    const pkg = (call.calleeParts[0] ?? '').toLowerCase();
+    // `import cryptorsa "crypto/rsa"` names the package something else at the
+    // call site, so the switch runs on the last segment of the imported path
+    // rather than on the identifier the file happens to use.
+    const root = call.calleeParts[0] ?? '';
+    const imported = ctx.aliases.get(root);
+    const pkg = (imported === undefined ? root : (imported.split('/').pop() ?? root)).toLowerCase();
     const id = goStdlib.id;
 
     switch (pkg) {
@@ -65,16 +70,22 @@ const goStdlib: Rule = {
       case 'dsa':
         return [detection(id, 'DSA', {}, 'DIGITAL_SIGNATURE')];
       case 'des':
-        return [
-          detection(
-            id,
-            call.method === 'NewTripleDESCipher' ? '3DES' : '3DES',
-            {},
-            'DATA_ENCRYPTION',
-            'RESOLVED',
-            call.method === 'NewCipher' ? 'single DES: 56-bit, broken without reference to quantum' : undefined,
-          ),
-        ];
+        // crypto/des exposes both ciphers. Reporting des.NewCipher as 3DES
+        // claims 112 classical bits for a 56-bit cipher and merges it into the
+        // same asset as real 3DES; the Primitive union has no DES member, so it
+        // is carried as a named UNKNOWN.
+        return call.method === 'NewTripleDESCipher'
+          ? [detection(id, '3DES', {}, 'DATA_ENCRYPTION')]
+          : [
+              detection(
+                id,
+                'UNKNOWN',
+                { name: 'DES', keySize: 56 },
+                'DATA_ENCRYPTION',
+                'RESOLVED',
+                'single DES: 56-bit, broken without reference to quantum',
+              ),
+            ];
       case 'aes':
         return [detection(id, 'AES', {}, 'DATA_ENCRYPTION')];
       case 'rc4':
@@ -137,7 +148,12 @@ const javaJca: Rule = {
 
     const out: Detection[] = [];
     // "AES/CBC/PKCS5Padding" - the mode and padding are half the security story.
-    const [algorithm, mode, padding] = spec.split('/');
+    // A JCA transformation string is case-insensitive, so both halves are
+    // upper-cased: `pkcs5padding` and `PKCS5Padding` are one configuration and
+    // must not hash to two assets.
+    const [algorithm, modeRaw, paddingRaw] = spec.split('/');
+    const mode = modeRaw?.toUpperCase();
+    const padding = paddingRaw?.toUpperCase();
     const name = (algorithm ?? spec).trim();
 
     if (receiver === 'Signature') {
@@ -207,7 +223,7 @@ const javaJca: Rule = {
         c.primitive,
         {
           ...c.parameters,
-          ...(mode === undefined ? {} : { mode: mode.toUpperCase() }),
+          ...(mode === undefined ? {} : { mode }),
           ...(padding === undefined ? {} : { padding }),
         },
         'DATA_ENCRYPTION',
@@ -241,7 +257,11 @@ const opensslC: Rule = {
     const m = call.method;
 
     if (m.startsWith('RSA_')) {
-      const bits = num(call.args[1]) ?? num(call.args[0]);
+      // Only RSA_generate_key_ex(rsa, bits, e, cb) carries a modulus. Argument 0
+      // of RSA_public_encrypt / RSA_private_decrypt is the plaintext length, and
+      // a positional fallback across the whole RSA_ prefix reported
+      // `RSA_public_encrypt(16, ...)` as a 16-bit key.
+      const bits = m === 'RSA_generate_key_ex' ? num(call.args[1]) : null;
       const isSig = /sign|verify/i.test(m);
       return [
         detection(
@@ -333,7 +353,11 @@ const rustCrypto: Rule = {
         return [];
       }
     }
-    const path = call.callee;
+    // The crate path the symbol was imported from is matched alongside the
+    // spelling at the call site. A renamed import (`use rsa::RsaPrivateKey as
+    // PrivKey`) otherwise hides the type name this whole rule dispatches on,
+    // and a bare `SigningKey` is Ed25519 in ed25519_dalek but ECDSA in p256.
+    const path = `${call.callee}::${ctx.aliases.get(call.calleeParts[0] ?? '') ?? ''}`;
     const id = rustCrypto.id;
 
     if (/Rsa/.test(path)) {
@@ -342,14 +366,27 @@ const rustCrypto: Rule = {
         detection(id, 'RSA', bits === null ? {} : { modulusLength: bits }, 'KEY_ESTABLISHMENT', 'RULE_DEFAULT', DUAL_USE_NOTE),
       ];
     }
-    if (/Ed25519|SigningKey/.test(path)) {
+    // Before the digest branches: the `hmac` crate's idiomatic alias is
+    // `type HmacSha256 = Hmac<Sha256>`, which matches the SHA-2 test too, so
+    // testing the hashes first classified the entire Rust MAC surface as a
+    // bare digest and never emitted an HMAC at all.
+    if (/Hmac/.test(path)) {
+      const digest = /Hmac[_:]*((?:Sha|Md)\d+)/i.exec(path)?.[1];
+      const h = digest === undefined ? null : hashFromName(digest);
+      const out: Detection[] = [
+        detection(id, 'HMAC', h === null ? {} : { hash: h.primitive }, 'INTEGRITY'),
+      ];
+      if (h) out.push(detection(id, h.primitive, h.parameters, 'INTEGRITY'));
+      return out;
+    }
+    if (/Ed25519/i.test(path)) {
       return [detection(id, 'EdDSA', { curve: 'Ed25519' }, 'DIGITAL_SIGNATURE')];
     }
     if (/X25519|StaticSecret|EphemeralSecret/.test(path)) {
       return [detection(id, 'X25519', {}, 'KEY_ESTABLISHMENT')];
     }
-    if (/\bp256\b|P256|Ecdsa/.test(path)) {
-      const curve = /p384|P384/.test(path) ? 'P-384' : 'P-256';
+    if (/\bp256\b|\bp384\b|Ecdsa/i.test(path)) {
+      const curve = /p384/i.test(path) ? 'P-384' : 'P-256';
       return [detection(id, 'ECDSA', { curve }, 'DIGITAL_SIGNATURE')];
     }
     if (/ChaCha20/i.test(path)) {
@@ -373,7 +410,6 @@ const rustCrypto: Rule = {
       return [detection(id, 'SHA2', { outputLength: bits }, 'INTEGRITY')];
     }
     if (/Md5/i.test(path)) return [detection(id, 'MD5', { outputLength: 128 }, 'INTEGRITY')];
-    if (/Hmac/.test(path)) return [detection(id, 'HMAC', {}, 'INTEGRITY')];
     if (/Pbkdf2/i.test(path)) return [detection(id, 'PBKDF2', {}, 'KEY_DERIVATION')];
     if (/Argon2/i.test(path)) return [detection(id, 'Argon2', {}, 'KEY_DERIVATION')];
     return [];
@@ -428,9 +464,31 @@ const dotnet: Rule = {
       case 'TripleDES':
       case 'TripleDESCng':
         return [detection(id, '3DES', {}, 'DATA_ENCRYPTION')];
-      case 'RC2':
+      // Neither has a member in the Primitive union, and 3DES is the wrong one
+      // to borrow: it asserts 112 classical bits for a 56-bit cipher and for a
+      // 40-128-bit Feistel cipher that is not related to DES at all.
       case 'DES':
-        return [detection(id, '3DES', { note: cls }, 'DATA_ENCRYPTION')];
+        return [
+          detection(
+            id,
+            'UNKNOWN',
+            { name: 'DES', keySize: 56 },
+            'DATA_ENCRYPTION',
+            'RESOLVED',
+            'single DES: 56-bit, broken without reference to quantum',
+          ),
+        ];
+      case 'RC2':
+        return [
+          detection(
+            id,
+            'UNKNOWN',
+            { name: 'RC2' },
+            'DATA_ENCRYPTION',
+            'RESOLVED',
+            'RC2: broken without reference to quantum',
+          ),
+        ];
       case 'MD5':
       case 'MD5CryptoServiceProvider':
         return [detection(id, 'MD5', { outputLength: 128 }, 'INTEGRITY')];

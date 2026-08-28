@@ -40,6 +40,22 @@ const sizeFrom = (symbol: string): Readonly<Record<string, string | number>> => 
   return m?.[1] === undefined ? {} : { modulusLength: Number(m[1]) };
 };
 
+/** Key size and mode as an EVP cipher accessor states them: EVP_aes_256_gcm. */
+const evpCipherFrom = (symbol: string): Readonly<Record<string, string | number>> => {
+  const bits = /_(128|192|256)_/.exec(symbol)?.[1];
+  const mode = /_(gcm|ccm|cbc|ctr|ecb|ofb|cfb\d*|xts|ocb|wrap)(?:$|_)/.exec(symbol)?.[1];
+  return {
+    ...(bits === undefined ? {} : { keySize: Number(bits) }),
+    ...(mode === undefined ? {} : { mode: mode.toUpperCase() }),
+  };
+};
+
+/** Digest length from the trailing figure: EVP_sha384, EVP_sha512_224. */
+const evpDigestFrom = (symbol: string): Readonly<Record<string, string | number>> => {
+  const m = /(\d{3})$/.exec(symbol);
+  return m?.[1] === undefined ? {} : { outputLength: Number(m[1]) };
+};
+
 /**
  * Order matters: the first matching rule wins, so specific patterns precede
  * generic ones. `EVP_` wrappers are deliberately last, because they name a
@@ -185,6 +201,67 @@ const RULES: readonly Rule[] = [
     purpose: 'DIGITAL_SIGNATURE',
     rationale: 'SLH-DSA / SPHINCS+ signature',
   },
+  // EVP_ accessors last, and only the ones that name an algorithm outright.
+  // OpenSSL 3 deprecated the low-level RSA_/AES_/SHA*_ entry points above, so a
+  // current libcrypto consumer imports these and nothing else - which left the
+  // 0.85 modality dead for the commonest case in modern software. The family
+  // wrappers (EVP_DigestSignInit, EVP_PKEY_CTX_new_id) stay unmatched on
+  // purpose: they name an algorithm in an argument, and a symbol table has no
+  // arguments to read.
+  {
+    pattern: /^EVP_aes_(128|192|256)_/,
+    primitive: 'AES',
+    purpose: 'DATA_ENCRYPTION',
+    rationale: 'OpenSSL EVP cipher accessor naming AES and its key size',
+    parameters: evpCipherFrom,
+  },
+  {
+    pattern: /^EVP_des_ede3/,
+    primitive: '3DES',
+    purpose: 'DATA_ENCRYPTION',
+    rationale: 'OpenSSL EVP cipher accessor naming Triple DES',
+    parameters: evpCipherFrom,
+  },
+  {
+    pattern: /^EVP_rc4/,
+    primitive: 'RC4',
+    purpose: 'DATA_ENCRYPTION',
+    rationale: 'OpenSSL EVP cipher accessor naming RC4',
+  },
+  {
+    pattern: /^EVP_chacha20/,
+    primitive: 'ChaCha20',
+    purpose: 'DATA_ENCRYPTION',
+    rationale: 'OpenSSL EVP cipher accessor naming ChaCha20',
+    parameters: () => ({ keySize: 256 }),
+  },
+  {
+    pattern: /^EVP_md5(_sha1)?$/,
+    primitive: 'MD5',
+    purpose: 'INTEGRITY',
+    rationale: 'OpenSSL EVP digest accessor naming MD5',
+    parameters: () => ({ outputLength: 128 }),
+  },
+  {
+    pattern: /^EVP_sha1$/,
+    primitive: 'SHA1',
+    purpose: 'INTEGRITY',
+    rationale: 'OpenSSL EVP digest accessor naming SHA-1',
+    parameters: () => ({ outputLength: 160 }),
+  },
+  {
+    pattern: /^EVP_sha(224|256|384|512)(_(224|256))?$/,
+    primitive: 'SHA2',
+    purpose: 'INTEGRITY',
+    rationale: 'OpenSSL EVP digest accessor naming SHA-2 and its output length',
+    parameters: evpDigestFrom,
+  },
+  {
+    pattern: /^EVP_(sha3_(224|256|384|512)|shake(128|256))$/,
+    primitive: 'SHA3',
+    purpose: 'INTEGRITY',
+    rationale: 'OpenSSL EVP digest accessor naming SHA-3 / SHAKE',
+  },
 ];
 
 export function matchSymbol(symbol: string): SymbolMatch | null {
@@ -229,7 +306,10 @@ const FINGERPRINTS: readonly { name: string; pattern: RegExp }[] = [
   { name: 'mbedTLS', pattern: /mbed\s?TLS\s+([\d.]+)/ },
   { name: 'wolfSSL', pattern: /wolfSSL\s+([\d.]+)/ },
   { name: 'GnuTLS', pattern: /GnuTLS\s+([\d.]+)/ },
-  { name: 'NSS', pattern: /NSS\s+([\d.]+)/ },
+  // Anchored: without the boundary a GNSS receiver banner - ubiquitous in the
+  // firmware images this detector targets - is reported as the NSS library
+  // carrying a version number, which reads as strong evidence.
+  { name: 'NSS', pattern: /\bNSS\s+([\d.]+)/ },
   { name: 'libsodium', pattern: /libsodium\s+([\d.]+)/ },
   { name: 'Bouncy Castle', pattern: /BouncyCastle(?:\s+v?([\d.]+))?/ },
 ];

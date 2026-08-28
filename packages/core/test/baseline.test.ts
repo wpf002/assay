@@ -125,6 +125,29 @@ describe('the baseline is what makes this survivable', () => {
     expect(r.introduced.map((f) => f.occurrenceId)).toEqual(['brand-new']);
   });
 
+  it('does not report a live acceptance as resolved because the finding is unreached today', () => {
+    // Presence in the estate and presence in the worklist are different
+    // predicates. Telling the operator to prune both is how the risk acceptance
+    // and its approver disappear, and the next scan that finds the occurrence
+    // reachable again fails the build on it as newly introduced.
+    const live: Suppression = {
+      occurrenceId: 'dormant',
+      reason: 'vendor appliance, replacement scheduled for Q1',
+      approvedBy: 'ciso@example.com',
+      expiresAt: '2026-12-01T00:00:00.000Z',
+    };
+    const w = worklistsOf([occ('dormant', { reachable: false })]);
+    const baseline = {
+      ...makeBaseline(w, { systemName: 'svc', createdAt: NOW.toISOString() }, GATE),
+      accepted: ['dormant'],
+      suppressions: [live],
+    };
+    const r = evaluateGate(w, baseline, GATE);
+    expect(w.unreached.map((f) => f.occurrenceId)).toEqual(['dormant']);
+    expect(r.stale).toEqual([]);
+    expect(r.resolved).toEqual([]);
+  });
+
   it('reports baseline entries that are gone, so the file can shrink', () => {
     const before = worklistsOf([occ('a'), occ('b')]);
     const baseline = makeBaseline(before, { systemName: 'svc', createdAt: NOW.toISOString() }, GATE);

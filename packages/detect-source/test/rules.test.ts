@@ -1,4 +1,8 @@
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { scanSource, type SourceScanResult } from '../src/index.js';
 import { languageFor, parseSource } from '../src/parsers/index.js';
 import { ruleIndex } from '../src/rules/index.js';
 import type { Detection, Lang } from '../src/types.js';
@@ -26,6 +30,11 @@ describe('language dispatch', () => {
     expect(languageFor('a.py')).toBe('python');
     expect(languageFor('a.rs')).toBe('rust');
     expect(languageFor('a.txt')).toBeNull();
+  });
+
+  it('walks a JS constructor call, which is how jose and its peers are invoked', () => {
+    const parsed = parseSource('a.ts', "import { SignJWT } from 'jose';\nnew SignJWT({});\n", 'typescript');
+    expect(parsed.calls.some((c) => c.method === 'SignJWT')).toBe(true);
   });
 });
 
@@ -133,6 +142,37 @@ describe('WebCrypto', () => {
     const d = detect(`await crypto.subtle.wrapKey('raw', k, wk, { name: 'AES-KW', length: 256 });`);
     expect(d[0]?.purpose).toBe('KEY_ESTABLISHMENT');
   });
+
+  it('finds the algorithm where each method actually puts it', () => {
+    // importKey takes it third and unwrapKey fourth; reading position 0
+    // everywhere misses the key-wrapping half of WebCrypto entirely.
+    const imported = detect(
+      `await crypto.subtle.importKey('raw', bytes, { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']);`,
+    );
+    expect(imported[0]?.primitive).toBe('ECDH');
+    expect(imported[0]?.parameters['curve']).toBe('P-256');
+
+    const unwrapped = detect(
+      `await crypto.subtle.unwrapKey('raw', wrapped, kek, { name: 'AES-KW' }, { name: 'AES-GCM' }, true, ['decrypt']);`,
+    );
+    expect(unwrapped[0]?.primitive).toBe('AES');
+    expect(unwrapped[0]?.parameters['mode']).toBe('KW');
+    expect(unwrapped[0]?.purpose).toBe('KEY_ESTABLISHMENT');
+  });
+
+  it('does not read the AES-CTR counter width as a key size', () => {
+    // On AesCtrParams `length` is the number of bits in the counter block, not
+    // the key length, so this site must not claim a 64-bit AES key - and must
+    // hash to the same asset as the generateKey site that made the key.
+    const ctr = detect(
+      `await crypto.subtle.encrypt({ name: 'AES-CTR', counter: iv, length: 64 }, key, data);`,
+    );
+    expect(ctr[0]?.primitive).toBe('AES');
+    expect(ctr[0]?.parameters['keySize']).toBeUndefined();
+
+    const generated = detect(`await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);`);
+    expect(generated[0]?.parameters['keySize']).toBe(256);
+  });
 });
 
 describe('JWT', () => {
@@ -153,6 +193,48 @@ describe('JWT', () => {
     expect(d.some((x) => x.primitive === 'ECDSA')).toBe(true);
     expect(d.some((x) => x.primitive === 'RSA')).toBe(true);
   });
+
+  it("reads jose's constructor-based signing API", () => {
+    // jose puts the alg on setProtectedHeader, and the whole chain hangs off a
+    // `new` expression the walker did not visit at all.
+    const d = detect(`
+      import { SignJWT } from 'jose';
+      const t = await new SignJWT({}).setProtectedHeader({ alg: 'RS256' }).sign(key);
+    `);
+    expect(d.map((x) => x.primitive).sort()).toEqual(['RSA', 'SHA2']);
+  });
+});
+
+describe('crypto-js', () => {
+  it('does not report single DES as 3DES, and finds it at all', () => {
+    const d = detect(`
+      const CryptoJS = require('crypto-js');
+      CryptoJS.DES.encrypt(msg, key);
+    `);
+    expect(d).toHaveLength(1);
+    expect(d[0]?.primitive).not.toBe('3DES');
+    expect(d[0]?.parameters['name']).toBe('DES');
+  });
+
+  it('still separates 3DES from DES', () => {
+    const d = detect(`
+      const CryptoJS = require('crypto-js');
+      CryptoJS.TripleDES.encrypt(msg, key);
+    `);
+    expect(d[0]?.primitive).toBe('3DES');
+  });
+
+  it('reaches every Hmac digest variant the library ships', () => {
+    // Dispatch is by method name, so a variant missing from `methods` never
+    // reaches the rule and is indistinguishable from a clean scan.
+    const d = detect(`
+      const CryptoJS = require('crypto-js');
+      CryptoJS.HmacSHA512(msg, key);
+    `);
+    expect(d.map((x) => x.primitive).sort()).toEqual(['HMAC', 'SHA2']);
+    expect(d.find((x) => x.primitive === 'SHA2')?.parameters['outputLength']).toBe(512);
+  });
+
 });
 
 describe('python: pyca/cryptography', () => {
@@ -193,6 +275,18 @@ x25519.X25519PrivateKey.generate()
     expect(d[0]?.purpose).toBe('KEY_ESTABLISHMENT');
   });
 
+  it('reads the DSA key size from the argument pyca actually puts it in', () => {
+    // dsa.generate_private_key(key_size, backend) - positional 0, unlike RSA
+    // and DH, which put it at 1. Reading 1 collapsed every DSA size into one
+    // parameterless asset.
+    const d = py(`
+from cryptography.hazmat.primitives.asymmetric import dsa
+dsa.generate_private_key(2048)
+`);
+    expect(d[0]?.primitive).toBe('DSA');
+    expect(d[0]?.parameters['modulusLength']).toBe(2048);
+  });
+
   it('does not fire on a local class called AES with no crypto import', () => {
     expect(py(`AES.new(key, AES.MODE_GCM)`)).toHaveLength(0);
   });
@@ -226,6 +320,16 @@ AES.new(key, AES.MODE_GCM)
   it('reads PyJWT algorithm keyword', () => {
     const d = py(`import jwt\njwt.encode(payload, key, algorithm='ES256')`);
     expect(d.some((x) => x.primitive === 'ECDSA')).toBe(true);
+  });
+
+  it('reads the PyJWT algorithm passed positionally', () => {
+    // encode(payload, key, algorithm) and decode(jwt, key, algorithms) both
+    // put it in argument 2, and the positional form is legal and common.
+    expect(py(`import jwt\njwt.encode(payload, key, "HS256")`).map((x) => x.primitive).sort()).toEqual([
+      'HMAC',
+      'SHA2',
+    ]);
+    expect(py(`import jwt\njwt.decode(tok, key, ["RS256"])`).some((x) => x.primitive === 'RSA')).toBe(true);
   });
 });
 
@@ -296,5 +400,38 @@ describe('the one-shot signing API', () => {
     `);
     // Only the JWT rule fires: `jwt` is not bound to node:crypto.
     expect(d.every((x) => x.parameters['alg'] === 'ES256' || x.primitive === 'SHA2')).toBe(true);
+  });
+});
+
+describe('the whole pipeline, from a file on disk to a Finding', () => {
+  async function scan(files: Record<string, string>): Promise<SourceScanResult> {
+    const dir = await mkdtemp(join(tmpdir(), 'assay-source-'));
+    for (const [name, content] of Object.entries(files)) {
+      await writeFile(join(dir, name), content, 'utf8');
+    }
+    return scanSource({ root: dir, systemId: 'svc', collectedAt: '2026-08-28T00:00:00.000Z' });
+  }
+
+  it('carries an unverifiable developer claim onto the finding (I6)', async () => {
+    // The taint has to survive the join between the rule and the Finding, or
+    // correlate never sees it and the assertion silently confirms.
+    const { findings } = await scan({ 'a.py': 'import hashlib\nhashlib.md5(data, usedforsecurity=False)\n' });
+    const md5 = findings.find((f) => f.asset.primitive === 'MD5');
+    expect(md5?.assumptions?.[0]).toContain('usedforsecurity=False');
+    expect(md5?.evidence.raw).toContain('purpose=INTEGRITY(RULE_DEFAULT)');
+  });
+
+  it('leaves an ordinary digest call with nothing to downgrade', async () => {
+    const { findings } = await scan({ 'a.py': 'import hashlib\nhashlib.md5(data)\n' });
+    const md5 = findings.find((f) => f.asset.primitive === 'MD5');
+    expect(md5?.assumptions).toBeUndefined();
+    expect(md5?.evidence.raw).toContain('purpose=INTEGRITY(RESOLVED)');
+  });
+
+  it('resolves a submodule import to the package that gates the rule', async () => {
+    const { findings } = await scan({
+      'a.ts': "import AES from 'crypto-js/aes';\nAES.encrypt(msg, key);\n",
+    });
+    expect(findings.map((f) => f.asset.primitive)).toEqual(['AES']);
   });
 });

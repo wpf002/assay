@@ -4,6 +4,7 @@ import {
   type ScanSummary,
   type StoredScan,
   type StoredTraceBundle,
+  type TraceBundleSummary,
 } from './types.js';
 
 /** Process-local store. Used by tests and by `assay serve --ephemeral`. */
@@ -16,10 +17,11 @@ export class MemoryScanStore implements ScanStore {
     this.scans.set(scan.id, scan);
   }
 
-  async list(systemName?: string): Promise<ScanSummary[]> {
+  async list(systemName: string | undefined, limit: number): Promise<ScanSummary[]> {
     return [...this.scans.values()]
       .filter((s) => systemName === undefined || s.systemName === systemName)
       .sort(byNewest)
+      .slice(0, limit)
       .map(summarize);
   }
 
@@ -42,14 +44,18 @@ export class MemoryScanStore implements ScanStore {
     return [...newest.values()].sort((a, b) => a.systemName.localeCompare(b.systemName));
   }
 
+  async latestSystemNames(): Promise<string[]> {
+    return [...new Set([...this.scans.values()].map((s) => s.systemName))].sort();
+  }
+
   async putTraces(bundle: StoredTraceBundle): Promise<void> {
     this.traces.set(bundle.id, bundle);
   }
 
-  async listTraces(): Promise<Omit<StoredTraceBundle, 'edges'>[]> {
+  async listTraces(): Promise<TraceBundleSummary[]> {
     return [...this.traces.values()]
       .sort((a, b) => b.ingestedAt.localeCompare(a.ingestedAt))
-      .map(({ edges, ...rest }) => ({ ...rest, edgeCount: edges.length }) as never);
+      .map(({ edges, ...rest }) => ({ ...rest, edgeCount: edges.length }));
   }
 
   async getTraces(id: string): Promise<StoredTraceBundle | null> {

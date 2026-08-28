@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   MAX_CLOCK_SKEW_SECONDS,
@@ -106,6 +107,15 @@ describe('signature verification', () => {
   it('rejects a verification key that is not a key', () => {
     expect(code(() => verifyGrant(signGrant(payload(), keys.privateKeyPem), 'hello'))).toBe('MALFORMED');
   });
+
+  it('classifies a key that cannot verify signatures at all rather than leaking the library error', () => {
+    // An X25519 key is a valid public key, so it survives createPublicKey and
+    // reaches verify(), which throws instead of returning false.
+    const x25519 = generateKeyPairSync('x25519')
+      .publicKey.export({ type: 'spki', format: 'pem' })
+      .toString();
+    expect(code(() => verifyGrant(signGrant(payload(), keys.privateKeyPem), x25519))).toBe('MALFORMED');
+  });
 });
 
 describe('the time window', () => {
@@ -144,6 +154,24 @@ describe('the time window', () => {
     expect(
       code(() => authorize(good(), 'api.example.com', 443, NOW, { clockSkewSeconds: -1_000_000 })),
     ).toBe('NO_ERROR');
+  });
+
+  it('treats a non-numeric skew request as no skew instead of skipping the window', () => {
+    // NaN passes straight through the clamp and makes both window comparisons
+    // false, which is an expired grant that still works.
+    const wayLate = new Date('2026-09-05T00:00:00.000Z');
+    for (const skew of [Number('60s'), Number('abc'), Number.NaN]) {
+      expect(code(() => authorize(good(), 'api.example.com', 443, wayLate, { clockSkewSeconds: skew }))).toBe(
+        'EXPIRED',
+      );
+      expect(
+        code(() =>
+          authorize(good(), 'api.example.com', 443, new Date('2026-07-01T00:00:00.000Z'), {
+            clockSkewSeconds: skew,
+          }),
+        ),
+      ).toBe('NOT_YET_VALID');
+    }
   });
 });
 
@@ -192,6 +220,40 @@ describe('target matching', () => {
   it('does not match an IPv4 address against an IPv6 CIDR', () => {
     expect(matchesTarget('2001:db8::/32', '10.0.0.1')).toBe(false);
   });
+
+  it('refuses a CIDR with no prefix length rather than reading it as /0', () => {
+    for (const target of ['10.0.0.0/', '10.0.0.0/ ', '10.0.0.0/\t', '10.0.0.0/+8', '10.0.0.0/08']) {
+      expect(matchesTarget(target, '8.8.8.8')).toBe(false);
+      expect(matchesTarget(target, '10.0.0.1')).toBe(false);
+    }
+    for (const target of ['2001:db8::/', '2001:db8::/ ', '2001:db8::/+8']) {
+      expect(matchesTarget(target, '2606:4700::1111')).toBe(false);
+      expect(matchesTarget(target, '::1')).toBe(false);
+      expect(matchesTarget(target, '::ffff:8.8.8.8')).toBe(false);
+      expect(matchesTarget(target, '2001:db8::1')).toBe(false);
+    }
+    // An explicit /0 still means what it says.
+    expect(matchesTarget('0.0.0.0/0', '8.8.8.8')).toBe(true);
+    expect(matchesTarget('::/0', '2606:4700::1111')).toBe(true);
+  });
+
+  it('refuses a CIDR with a third component rather than dropping it', () => {
+    expect(matchesTarget('10.0.0.0/8/32', '10.0.0.1')).toBe(false);
+    expect(matchesTarget('2001:db8::/32/128', '2001:db8::1')).toBe(false);
+  });
+
+  it('refuses IPv6 literals that no resolver would accept', () => {
+    expect(matchesTarget('::/128', ':::')).toBe(false);
+    expect(matchesTarget('::1/128', '::1:')).toBe(false);
+    expect(matchesTarget('1:2:3:4:5:6:7:8/128', '1:2:3:4:5:6:7::8')).toBe(false);
+    expect(matchesTarget('102:304::/32', '1.2.3.4::')).toBe(false);
+    expect(matchesTarget('102:304::/32', '1.2.3.4::1')).toBe(false);
+    expect(matchesTarget('::/0', '1:2::3:')).toBe(false);
+    // The forms that are real addresses still match.
+    expect(matchesTarget('::ffff:0:0/96', '::ffff:192.0.2.1')).toBe(true);
+    expect(matchesTarget('::/128', '::')).toBe(true);
+    expect(matchesTarget('2001:db8::/32', '2001:db8:0:0:0:0:0:1')).toBe(true);
+  });
 });
 
 describe('port scope', () => {
@@ -209,6 +271,19 @@ describe('host scope', () => {
   it('refuses a host outside every target', () => {
     expect(code(() => authorize(good(), 'evil.test', 443, NOW))).toBe('TARGET_OUT_OF_SCOPE');
     expect(code(() => authorize(good(), '10.0.1.5', 443, NOW))).toBe('TARGET_OUT_OF_SCOPE');
+  });
+
+  it('refuses every host when a signed target lost its prefix length', () => {
+    const g = (target: string) =>
+      verifyGrant(signGrant(payload({ targets: [target] }), keys.privateKeyPem), keys.publicKeyPem);
+    expect(code(() => authorize(g('10.0.0.0/'), '8.8.8.8', 443, NOW))).toBe('TARGET_OUT_OF_SCOPE');
+    expect(code(() => authorize(g('2001:db8::/'), '2606:4700::1111', 443, NOW))).toBe(
+      'TARGET_OUT_OF_SCOPE',
+    );
+    // The IPv4-mapped form is how a v6-only typo reaches an IPv4 host.
+    expect(code(() => authorize(g('2001:db8::/'), '[::ffff:8.8.8.8]', 443, NOW))).toBe(
+      'TARGET_OUT_OF_SCOPE',
+    );
   });
 
   it('reports scope without throwing, for planning a probe list', () => {

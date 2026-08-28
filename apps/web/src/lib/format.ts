@@ -23,14 +23,19 @@ export function assetLabel(f: RankedFinding): string {
   );
 
   const size = params['modulusLength'] ?? params['keySize'] ?? params['primeLength'];
-  const curve = params['curve'];
+  // A curve outside the naming catalog is carried as `group`, verbatim from the
+  // handshake. Dropping it renders two endpoints on two different curves as the
+  // same bare primitive, which reads as one row duplicated.
+  const curve = params['curve'] ?? params['group'];
   const mode = params['mode'];
   const outputLength = params['outputLength'];
   const padding = params['padding'];
 
   if (primitive === 'DH' && params['ephemeral'] === 'true') return 'DHE';
   if (primitive === 'ECDH' && params['ephemeral'] === 'true') return 'ECDHE';
-  if (mode === 'KEY_TRANSPORT') return `${primitive} key transport`;
+  if (mode === 'KEY_TRANSPORT') {
+    return padding === undefined ? `${primitive} key transport` : `${primitive} key transport ${padding}`;
+  }
   // Nobody writes "EdDSA-Ed25519"; the curve is the name people use.
   if (primitive === 'EdDSA' && curve !== undefined) return curve;
 
@@ -127,7 +132,13 @@ export function actionDetail(f: RankedFinding): string {
 /** When it is due, in words, not a signed float. */
 export function due(f: RankedFinding): string {
   const years = Math.abs(f.slackYears);
-  const rounded = years < 1 ? `${Math.round(years * 12)} months` : `${years.toFixed(1)} years`;
+  const months = Math.round(years * 12);
+  const rounded =
+    years >= 1
+      ? `${years.toFixed(1)} years`
+      : months === 0
+        ? 'less than a month'
+        : `${months} month${months === 1 ? '' : 's'}`;
   return f.late ? `Overdue by ${rounded}` : `${rounded} of slack`;
 }
 
@@ -193,6 +204,16 @@ const WHY_LONG: Readonly<Record<string, string>> = {
 
 const short = (years: number): string => `${years} year${years === 1 ? '' : 's'}`;
 
+/**
+ * The counterfactual, which is not always a positive quantity of time: once
+ * X + Y passes the horizon the physics has run out too, and "you would have
+ * had -1.66 years" says the opposite of what it means.
+ */
+const withoutTheDeadline = (slack: number): string =>
+  slack < 0
+    ? `you would already have been ${Math.abs(slack)} years late`
+    : `you would have had ${short(slack)}`;
+
 /** How much you are over or under, without a signed number in the prose. */
 const margin = (slack: number): string =>
   slack < 0
@@ -214,7 +235,7 @@ export function whyThisDate(m: MoscaTerms): string[] {
     );
     lines.push(
       m.crqc.slackYears > m.regulatory.slackYears
-        ? `On the physics alone you would have had ${m.crqc.slackYears} years. The regulation is what binds here, not the quantum computer.`
+        ? `On the physics alone ${withoutTheDeadline(m.crqc.slackYears)}. The regulation is what binds here, not the quantum computer.`
         : 'The regulation and the physics point the same way here.',
     );
     return lines;

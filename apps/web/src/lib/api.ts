@@ -166,13 +166,33 @@ export const getWorklists = (scanId: string, pack: string, secrecyYears: number)
   get(`/scans/${scanId}/worklists?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`);
 export const ESTATE_SCAN = '__estate__';
 
-export const getDerivation = (scanId: string, occId: string, pack: string): Promise<Derivation> =>
+/**
+ * secrecyYears is not optional here. The panel is the derivation of the number
+ * on the row it was opened from, and the route defaults X to 5 when it is not
+ * sent - so omitting it re-ranks the finding under a different X and the two
+ * views disagree about whether the item is overdue at all.
+ */
+export const getDerivation = (
+  scanId: string,
+  occId: string,
+  pack: string,
+  secrecyYears: number,
+): Promise<Derivation> =>
   get(
     `${scanId === ESTATE_SCAN ? '/estate' : `/scans/${scanId}`}/occurrences/` +
-      `${encodeURIComponent(occId)}?pack=${encodeURIComponent(pack)}`,
+      `${encodeURIComponent(occId)}?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`,
   );
 export const getEstate = (pack: string, secrecyYears: number): Promise<EstateResult> =>
   get(`/estate/worklists?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`);
 export const getCoverage = (): Promise<Coverage> => get('/estate/coverage');
-export const getRerank = (scanId: string, from: string, to: string): Promise<RerankResult> =>
-  get(`/scans/${scanId}/rerank?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+/** Both sides are ranked at the operator's X, or the comparison is not like-for-like. */
+export const getRerank = (
+  scanId: string,
+  from: string,
+  to: string,
+  secrecyYears: number,
+): Promise<RerankResult> =>
+  get(
+    `/scans/${scanId}/rerank?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` +
+      `&secrecyYears=${secrecyYears}`,
+  );

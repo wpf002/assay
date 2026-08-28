@@ -39,6 +39,18 @@ export async function loadTraces(path: string): Promise<LoadedTraces> {
     to = bundle.data.to;
     source = bundle.data.source;
   } else {
+    // Only an OTLP export may take this branch. OtlpTraceSchema is non-strict
+    // and defaults its single field, so every JSON object parses as one and
+    // yields no spans at all: without this check a bundle rejected for a bad
+    // timestamp is silently re-read as an empty export, the scan loses every
+    // cross-service promotion, and nothing is printed to say so.
+    if (!isOtlpExport(raw)) {
+      throw new Error(
+        `${resolve(path)} is not a valid trace bundle: ${bundle.error.issues
+          .map((i) => `${i.path.join('.')} ${i.message.toLowerCase()}`)
+          .join('; ')}`,
+      );
+    }
     spans = spansFromOtlp(raw);
     const window = z
       .object({ from: z.string().optional(), to: z.string().optional(), source: z.string().optional() })
@@ -50,7 +62,19 @@ export async function loadTraces(path: string): Promise<LoadedTraces> {
     source = window.success && window.data.source !== undefined ? window.data.source : resolve(path);
   }
 
+  // An edge needs a service name at both ends. A file that carries none of
+  // them promotes nothing, and reporting that is the only way the operator
+  // learns it, since an empty graph prints no trace line at all.
+  if (spans.length === 0) {
+    throw new Error(`${resolve(path)} carries no spans with a service name`);
+  }
+
   const normalized = spans.map((s) => SpanRecordSchema.parse(s));
   const graph = buildServiceGraph({ from, to, source, spans: normalized });
   return { graph, spans: normalized, roots: traceRoots(graph, normalized) };
+}
+
+/** OTLP JSON carries its spans under resourceSpans; a bundle carries `spans`. */
+function isOtlpExport(raw: unknown): boolean {
+  return typeof raw === 'object' && raw !== null && 'resourceSpans' in raw;
 }

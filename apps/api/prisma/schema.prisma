@@ -28,6 +28,7 @@ model CryptoAsset {
   nistQuantumSecurityLevel Int?
   oid                      String?
   occurrences              Occurrence[]
+  scans                    ScanAsset[]
 
   @@index([quantumVulnerable, purpose])
 }
@@ -40,6 +41,12 @@ model Occurrence {
   assetId      String
   system       System      @relation(fields: [systemId], references: [id])
   systemId     String
+  /// The logical system the occurrence itself names, which is part of its
+  /// content hash. `systemId` above is the System row the SCAN was filed
+  /// under, and one scan may cover several logical systems; without this
+  /// column the occurrence's own value is unrecoverable, and trace
+  /// correlation and ticket export both key off it.
+  systemKey    String
   controlClass String
 
   reachable       Boolean?
@@ -104,8 +111,24 @@ model Scan {
   // could not have run (I8); recording it makes that auditable after the fact.
   scopeGrantId      String?
   occurrences       Occurrence[]
+  assets            ScanAsset[]
 
   @@index([systemName, startedAt])
+}
+
+/// The assets a scan declared, including any that produced no occurrence.
+///
+/// Reconstructing the asset set by walking occurrences loses exactly the
+/// inventory entries that have no work item behind them, so a GET of a scan
+/// would report fewer assets than the POST that wrote it.
+model ScanAsset {
+  scan    Scan        @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scanId  String
+  asset   CryptoAsset @relation(fields: [assetId], references: [id])
+  assetId String
+
+  @@id([scanId, assetId])
+  @@index([assetId])
 }
 
 /// Derived service graph from distributed traces.

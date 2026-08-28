@@ -172,6 +172,17 @@ function parsePnpmLock(text: string, file: string): Declared[] {
   return out;
 }
 
+/**
+ * requirements.txt declares no scope of its own, so the filename is the only
+ * signal there is. Testing the whole relative path marked every manifest under
+ * a directory whose name merely contains "dev" or "test" - dev-portal,
+ * attestation-service, latest-api - as dev tooling and silently dropped its
+ * entire crypto surface.
+ */
+function isDevRequirements(name: string): boolean {
+  return /^(dev|test)[-_.]requirements.*\.txt$/i.test(name) || /^requirements[-_.](dev|test)/i.test(name);
+}
+
 function parseRequirements(text: string, file: string): Declared[] {
   const out: Declared[] = [];
   text.split(/\r?\n/).forEach((line, i) => {
@@ -183,7 +194,7 @@ function parseRequirements(text: string, file: string): Declared[] {
       name: m[1],
       version: m[2] ?? null,
       ecosystem: 'pypi',
-      dev: /dev|test/i.test(file),
+      dev: isDevRequirements(basename(file)),
       file,
       line: i + 1,
     });
@@ -236,21 +247,33 @@ function parsePoetryLock(text: string, file: string): Declared[] {
 
 function parsePipfile(text: string, file: string): Declared[] {
   const out: Declared[] = [];
-  let dev = false;
+  // Only [packages] and [dev-packages] declare dependencies. Skipping other
+  // table headers without leaving the current table read `verify_ssl = true`
+  // under the stock [[source]] block as a pypi package - and it matches the
+  // crypto-token pattern, so every Pipfile in the estate reported a
+  // nonexistent `verify_ssl` as a coverage gap.
+  let table: 'packages' | 'dev-packages' | null = null;
   text.split(/\r?\n/).forEach((line, i) => {
     const trimmed = line.trim();
-    if (/^\[dev-packages\]/.test(trimmed)) {
-      dev = true;
+    if (/^\[/.test(trimmed)) {
+      table = /^\[dev-packages\]/.test(trimmed)
+        ? 'dev-packages'
+        : /^\[packages\]/.test(trimmed)
+          ? 'packages'
+          : null;
       return;
     }
-    if (/^\[packages\]/.test(trimmed)) {
-      dev = false;
-      return;
-    }
-    if (/^\[/.test(trimmed)) return;
+    if (table === null) return;
     const m = /^([A-Za-z0-9._-]+)\s*=/.exec(trimmed);
     if (!m?.[1]) return;
-    out.push({ name: m[1], version: null, ecosystem: 'pypi', dev, file, line: i + 1 });
+    out.push({
+      name: m[1],
+      version: null,
+      ecosystem: 'pypi',
+      dev: table === 'dev-packages',
+      file,
+      line: i + 1,
+    });
   });
   return out;
 }

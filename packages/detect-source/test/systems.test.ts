@@ -73,9 +73,54 @@ func f() { des.NewTripleDESCipher(k); rc4.NewCipher(k); md5.New() }
     expect(prims).toContain('RC4');
     expect(prims).toContain('MD5');
   });
+
+  it('does not report single DES at the strength of 3DES', () => {
+    const single = go(`
+import "crypto/des"
+func f() { des.NewCipher(k) }
+`);
+    expect(single[0]?.primitive).not.toBe('3DES');
+    expect(single[0]?.parameters['name']).toBe('DES');
+    expect(single[0]?.parameters['keySize']).toBe(56);
+    const triple = go(`
+import "crypto/des"
+func f() { des.NewTripleDESCipher(k) }
+`);
+    expect(triple[0]?.primitive).toBe('3DES');
+  });
+
+  it('records the import path an aliased spec names, not the raw spec text', () => {
+    const parsed = parseSource('main.go', 'package main\nimport cryptorsa "crypto/rsa"\n', 'go');
+    expect([...parsed.context.imports]).toContain('crypto/rsa');
+    expect([...parsed.context.imports].every((i) => !i.includes('"'))).toBe(true);
+  });
+
+  it('resolves an aliased import to the package it names', () => {
+    const d = go(`
+package main
+import cryptorsa "crypto/rsa"
+func main() { cryptorsa.GenerateKey(rand.Reader, 2048) }
+`);
+    expect(d[0]?.primitive).toBe('RSA');
+    expect(d[0]?.parameters['modulusLength']).toBe(2048);
+  });
 });
 
 describe('Java JCA', () => {
+  it('gives one transformation string one asset however it is capitalized', () => {
+    // JCA transformation strings are case-insensitive; the parameters feed the
+    // asset id, so a lower-case spelling would split the work item.
+    const lower = java(`
+import javax.crypto.Cipher;
+class A { void f() throws Exception { Cipher.getInstance("aes/cbc/pkcs5padding"); } }
+`);
+    const upper = java(`
+import javax.crypto.Cipher;
+class A { void f() throws Exception { Cipher.getInstance("AES/CBC/PKCS5Padding"); } }
+`);
+    expect(lower[0]?.parameters).toEqual(upper[0]?.parameters);
+  });
+
   it('splits a transformation string into algorithm, mode and padding', () => {
     const d = java(`
 import javax.crypto.Cipher;
@@ -83,7 +128,18 @@ class A { void f() throws Exception { Cipher.getInstance("AES/CBC/PKCS5Padding")
 `);
     expect(d[0]?.primitive).toBe('AES');
     expect(d[0]?.parameters['mode']).toBe('CBC');
-    expect(d[0]?.parameters['padding']).toBe('PKCS5Padding');
+    expect(d[0]?.parameters['padding']).toBe('PKCS5PADDING');
+  });
+
+  it('resolves a fully-qualified receiver', () => {
+    // `javax.crypto.Cipher` parses as a field_access, and without a case for it
+    // the receiver came back empty and the rule bailed before its import gate.
+    const d = java(`
+import javax.crypto.Cipher;
+class A { void f() throws Exception { javax.crypto.Cipher.getInstance("AES/GCM/NoPadding"); } }
+`);
+    expect(d[0]?.primitive).toBe('AES');
+    expect(d[0]?.parameters['mode']).toBe('GCM');
   });
 
   it('reads a signature algorithm as its primitive plus its digest', () => {
@@ -128,6 +184,16 @@ int main() { RSA_generate_key_ex(rsa, 2048, e, NULL); }
 `);
     expect(d[0]?.primitive).toBe('RSA');
     expect(d[0]?.parameters['modulusLength']).toBe(2048);
+  });
+
+  it('does not read a plaintext length as a modulus', () => {
+    // Argument 0 of RSA_public_encrypt is the input length, not a key size.
+    const d = c(`
+#include <openssl/rsa.h>
+int main() { RSA_public_encrypt(16, pt, out, rsa, RSA_PKCS1_OAEP_PADDING); }
+`);
+    expect(d[0]?.primitive).toBe('RSA');
+    expect(d[0]?.parameters['modulusLength']).toBeUndefined();
   });
 
   it('reads the curve from a NID constant', () => {
@@ -190,6 +256,36 @@ fn main(){ StaticSecret::new(rng); }`)[0]?.purpose).toBe('KEY_ESTABLISHMENT');
     expect(rust(`use ed25519_dalek::SigningKey;
 fn main(){ SigningKey::generate(&mut rng); }`)[0]?.purpose).toBe('DIGITAL_SIGNATURE');
   });
+
+  it('reads the hmac crate alias as a MAC, not as its inner digest', () => {
+    // `type HmacSha256 = Hmac<Sha256>` is the crate README's own idiom, so this
+    // is the whole Rust integrity surface rather than an edge case.
+    const d = rust(`
+use hmac::Hmac;
+use sha2::Sha256;
+type HmacSha256 = Hmac<Sha256>;
+fn main() { let m = HmacSha256::new_from_slice(b"key").unwrap(); }
+`);
+    expect(d.map((x) => x.primitive).sort()).toEqual(['HMAC', 'SHA2']);
+    expect(d.find((x) => x.primitive === 'HMAC')?.parameters['hash']).toBe('SHA2');
+  });
+
+  it('tells an ECDSA SigningKey apart from an Ed25519 one by the crate it came from', () => {
+    const d = rust(`
+use p256::ecdsa::SigningKey;
+fn main() { let k = SigningKey::generate(&mut rng); }
+`);
+    expect(d[0]?.primitive).toBe('ECDSA');
+    expect(d[0]?.parameters['curve']).toBe('P-256');
+  });
+
+  it('resolves a renamed import to the crate it names', () => {
+    const d = rust(`
+use rsa::RsaPrivateKey as PrivKey;
+fn main() { let k = PrivKey::new(&mut rng, 2048); }
+`);
+    expect(d[0]?.primitive).toBe('RSA');
+  });
 });
 
 describe('C#', () => {
@@ -211,6 +307,17 @@ class A { void F() { TripleDES.Create(); SHA1.Create(); MD5.Create(); } }
     expect(prims).toContain('3DES');
     expect(prims).toContain('SHA1');
     expect(prims).toContain('MD5');
+  });
+
+  it('does not file RC2 and single DES under the 3DES primitive', () => {
+    // Both would otherwise claim 112 classical bits, and RC2 is not related to
+    // DES at all.
+    const d = cs(`
+using System.Security.Cryptography;
+class A { void F() { RC2.Create(); DES.Create(); } }
+`);
+    expect(d.every((x) => x.primitive !== '3DES')).toBe(true);
+    expect(d.map((x) => x.parameters['name']).sort()).toEqual(['DES', 'RC2']);
   });
 
   it('emits HMAC and its digest as two assets', () => {

@@ -103,6 +103,69 @@ category = "dev"
   });
 });
 
+describe('a manifest name that no ecosystem uses can never be looked up', () => {
+  it('finds the PyPI bcrypt distribution under the name a requirements file writes', async () => {
+    expect(lookup('bcrypt', 'pypi')).not.toBeNull();
+    expect(lookup('bcrypt', 'npm')?.ecosystem).toBe('npm');
+    const dir = await fixture({ 'requirements.txt': 'bcrypt==4.1.2\n' });
+    const { findings, uncatalogued } = await scanDependencies({ root: dir, ...OPTS });
+    expect(uncatalogued).toEqual([]);
+    expect(findings.length).toBeGreaterThan(0);
+  });
+});
+
+describe('requirements.txt scope comes from the filename, not the directory it sits in', () => {
+  it('keeps a production manifest under a directory whose name contains dev or test', async () => {
+    const dir = await fixture({
+      'packages/dev-portal/requirements.txt': 'pycryptodome==3.19.0\n',
+      'services/attestation-service/requirements.txt': 'cryptography==42.0.5\n',
+    });
+    const { findings } = await scanDependencies({ root: dir, ...OPTS });
+    expect(findings.every((f) => f.evidence.raw.includes('scope=prod'))).toBe(true);
+    expect(findings.some((f) => f.evidence.raw.includes('pycryptodome'))).toBe(true);
+    expect(findings.some((f) => f.evidence.raw.includes('cryptography'))).toBe(true);
+  });
+
+  it('still treats a dev requirements file as dev tooling', async () => {
+    const dir = await fixture({ 'requirements-dev.txt': 'pycryptodome==3.19.0\n' });
+    expect((await scanDependencies({ root: dir, ...OPTS })).findings).toHaveLength(0);
+  });
+});
+
+describe('Pipfile', () => {
+  const PIPFILE = `[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+pytest = "*"
+
+[packages]
+cryptography = "*"
+
+[requires]
+python_version = "3.11"
+`;
+
+  it('reads the two package tables and nothing else', async () => {
+    const dir = await fixture({ Pipfile: PIPFILE });
+    const { findings, uncatalogued } = await scanDependencies({ root: dir, ...OPTS });
+    // verify_ssl matches the crypto-token pattern, so a stray TOML key would
+    // show up here as a package nobody can catalogue.
+    expect(uncatalogued).toEqual([]);
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.every((f) => f.evidence.raw.includes('cryptography'))).toBe(true);
+  });
+
+  it('does not leak the previous table scope into a later one', async () => {
+    const dir = await fixture({ Pipfile: PIPFILE });
+    const { findings } = await scanDependencies({ root: dir, ...OPTS, includeDev: true });
+    const names = findings.map((f) => f.evidence.raw.split(' ')[0]);
+    expect(names.some((n) => n?.includes('python_version'))).toBe(false);
+  });
+});
+
 describe('coverage-gap reporting is tight enough to be useful', () => {
   it('does not flag packages that merely contain sign / key / crypt as substrings', async () => {
     const dir = await fixture({

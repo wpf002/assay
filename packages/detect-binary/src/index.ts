@@ -189,10 +189,21 @@ function toFindings(report: BinaryReport, opts: BinaryScanOptions): Finding[] {
   for (const candidate of report.der) {
     const oid = candidate.algorithmOid;
     const known = oid === null ? undefined : KEY_ALGORITHM_OIDS[oid];
-    if (known === undefined) continue;
+    // A PKCS#1 RSAPrivateKey - openssl genrsa's own output, and what every
+    // `BEGIN RSA PRIVATE KEY` file holds - carries no AlgorithmIdentifier, so
+    // there is no OID to recognise and the whole finding was being thrown away.
+    // The kind is the finding. The OID filter still earns its place for
+    // certificates and public keys, where an unrecognised one means noise.
+    if (known === undefined && candidate.kind !== 'private-key') continue;
+    const note =
+      known !== undefined
+        ? known.note
+        : oid === null
+          ? 'no AlgorithmIdentifier in the structure'
+          : 'algorithm OID not recognised';
     out.push({
       asset: makeAsset(
-        known.primitive as Primitive,
+        (known?.primitive ?? 'UNKNOWN') as Primitive,
         {},
         candidate.kind === 'certificate' ? 'CERTIFICATE_AUTH' : 'KEY_ESTABLISHMENT',
       ),
@@ -204,7 +215,7 @@ function toFindings(report: BinaryReport, opts: BinaryScanOptions): Finding[] {
         locator: `${report.file}@0x${candidate.offset.toString(16)}`,
         raw:
           `embedded ${candidate.kind} (${candidate.length} bytes) algorithm=${oid ?? 'unknown'} ` +
-          `(${known.note})` +
+          `(${note})` +
           (candidate.kind === 'private-key'
             ? ' :: existence and algorithm recorded; key material was never read (I9)'
             : ''),

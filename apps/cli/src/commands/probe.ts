@@ -6,6 +6,7 @@ import { authorize, verifyGrant, ScopeError } from '@assay/scope';
 import { probeTarget } from '@assay/detect-network';
 import { lifetimeBreaches, parseCertificates, toFindings as pkiFindings } from '@assay/detect-pki';
 import { decimalYear, loadPack } from '@assay/policy';
+import { nowOption, numberOption } from '../options.js';
 
 export interface ProbeCommandOptions {
   readonly grant: string;
@@ -33,11 +34,19 @@ export async function runProbe(targets: string[], options: ProbeCommandOptions):
   const grantJson: unknown = JSON.parse(await readFile(resolve(options.grant), 'utf8'));
   const grant = verifyGrant(grantJson, await readFile(resolve(pubkeyPath), 'utf8'));
 
-  const now = options.now ? new Date(options.now) : new Date();
+  const now = nowOption(options.now);
   const collectedAt = now.toISOString();
   const pack = loadPack(options.policy);
   const systemId = options.system ?? 'probed-estate';
-  const skew = options.clockSkewSeconds === undefined ? undefined : Number(options.clockSkewSeconds);
+  const timeoutMs = numberOption('--timeout-ms', options.timeoutMs, { min: 1 });
+  const secrecyYears = numberOption('--secrecy-years', options.secrecyYears, { min: 0, max: 100 });
+  // NaN is not a wide skew allowance, it is no allowance at all: every
+  // comparison against it is false, so both ends of the grant window stop
+  // being checked and an expired grant probes anyway.
+  const skew =
+    options.clockSkewSeconds === undefined
+      ? undefined
+      : numberOption('--clock-skew-seconds', options.clockSkewSeconds);
 
   const findings: Finding[] = [];
   const certificates: ReturnType<typeof parseCertificates> = [];
@@ -65,7 +74,7 @@ export async function runProbe(targets: string[], options: ProbeCommandOptions):
     const report = await probeTarget(authorized, {
       systemId,
       collectedAt,
-      timeoutMs: Number(options.timeoutMs),
+      timeoutMs,
     });
     findings.push(...report.findings);
     probed.push({
@@ -90,7 +99,7 @@ export async function runProbe(targets: string[], options: ProbeCommandOptions):
   const worklists = rank(occurrences, assets, {
     policy: pack,
     currentYear: decimalYear(now),
-    secrecyLifetime: () => ({ years: Number(options.secrecyYears), assumed: true }),
+    secrecyLifetime: () => ({ years: secrecyYears, assumed: true }),
   });
 
   const cbom = toCycloneDX(occurrences, assets, {

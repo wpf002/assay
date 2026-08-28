@@ -59,8 +59,13 @@ const pycaAsymmetric: Rule = {
       ];
     }
     if (path.includes('dsa')) {
+      // pyca's DSA functions are generate_private_key(key_size, backend) and
+      // generate_parameters(key_size, backend): key_size is positional 0, not
+      // 1 as it is for RSA and DH. Reading index 1 collapsed DSA-1024 and
+      // DSA-3072 into one parameterless asset.
+      const dsaKeySize = num(arg(call, 0, 'key_size'));
       return [
-        detection(id, 'DSA', keySize === null ? {} : { modulusLength: keySize }, 'DIGITAL_SIGNATURE'),
+        detection(id, 'DSA', dsaKeySize === null ? {} : { modulusLength: dsaKeySize }, 'DIGITAL_SIGNATURE'),
       ];
     }
     if (path.includes('.ec.') || path.startsWith('ec.')) {
@@ -278,13 +283,18 @@ const pyjwt: Rule = {
   languages: ['python'],
   methods: ['encode', 'decode'],
   requiresImport: ['jwt'],
-  rationale: "PyJWT names the algorithm in `algorithm=` / `algorithms=`.",
+  rationale:
+    "PyJWT names the algorithm in `algorithm=` / `algorithms=`, or positionally: encode(payload, key, algorithm) and decode(jwt, key, algorithms) both put it in argument 2.",
   detect(call, ctx) {
     if (!boundTo(call, ctx, ['jwt'])) return [];
     const names: string[] = [];
-    const single = str(call.kwargs['algorithm']);
+    // Argument 2 is the algorithm on both encode and decode, so the same slot
+    // serves the single name and the allowlist; str() and the array check
+    // decide which of the two it is.
+    const third = call.args[2];
+    const single = str(call.kwargs['algorithm'] ?? third);
     if (single !== null) names.push(single);
-    const list = call.kwargs['algorithms'];
+    const list = call.kwargs['algorithms'] ?? third;
     if (list?.kind === 'array') {
       for (const item of list.array ?? []) {
         const s = str(item);

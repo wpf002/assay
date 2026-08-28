@@ -22,6 +22,13 @@ export interface LibraryEntry {
   readonly ecosystem: 'npm' | 'pypi';
   readonly capabilities: readonly Capability[];
   readonly note?: string;
+  /**
+   * The real distribution name, when the catalog key had to be disambiguated.
+   * npm and PyPI both ship a package called `bcrypt` and the keyspace is flat,
+   * so one of them needs a suffixed key - and without this the suffixed entry
+   * is unreachable, because no manifest ever names it.
+   */
+  readonly distribution?: string;
 }
 
 const kex = (primitive: Primitive, parameters?: Capability['parameters']): Capability => ({
@@ -109,7 +116,7 @@ export const CATALOG: Readonly<Record<string, LibraryEntry>> = {
   rsa: { ecosystem: 'pypi', capabilities: [kex('RSA'), sig('RSA')] },
   passlib: { ecosystem: 'pypi', capabilities: [{ primitive: 'PBKDF2', purpose: 'KEY_DERIVATION' }, { primitive: 'Argon2', purpose: 'KEY_DERIVATION' }, { primitive: 'scrypt', purpose: 'KEY_DERIVATION' }] },
   'argon2-cffi': { ecosystem: 'pypi', capabilities: [{ primitive: 'Argon2', purpose: 'KEY_DERIVATION' }] },
-  bcrypt_py: { ecosystem: 'pypi', capabilities: [{ primitive: 'UNKNOWN', purpose: 'KEY_DERIVATION', parameters: { name: 'bcrypt' } }] },
+  bcrypt_py: { ecosystem: 'pypi', distribution: 'bcrypt', capabilities: [{ primitive: 'UNKNOWN', purpose: 'KEY_DERIVATION', parameters: { name: 'bcrypt' } }] },
   pynacl: { ecosystem: 'pypi', capabilities: [sig('EdDSA', { curve: 'Ed25519' }), kex('X25519'), enc('ChaCha20')] },
   oscrypto: { ecosystem: 'pypi', capabilities: [kex('RSA'), sig('RSA'), sig('ECDSA'), enc('AES'), enc('3DES')] },
   'M2Crypto': { ecosystem: 'pypi', capabilities: [kex('RSA'), sig('RSA'), sig('DSA'), kex('DH'), enc('AES'), enc('3DES')] },
@@ -122,7 +129,8 @@ export function lookup(name: string, ecosystem: 'npm' | 'pypi'): LibraryEntry | 
   const normalized = ecosystem === 'pypi' ? name.toLowerCase().replace(/[-_.]+/g, '-') : name.toLowerCase();
   for (const [key, entry] of Object.entries(CATALOG)) {
     if (entry.ecosystem !== ecosystem) continue;
-    const k = ecosystem === 'pypi' ? key.toLowerCase().replace(/[-_.]+/g, '-') : key.toLowerCase();
+    const declared = entry.distribution ?? key;
+    const k = ecosystem === 'pypi' ? declared.toLowerCase().replace(/[-_.]+/g, '-') : declared.toLowerCase();
     if (k === normalized) return entry;
   }
   return null;

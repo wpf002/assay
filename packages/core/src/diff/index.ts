@@ -1,4 +1,4 @@
-import { gate, type AssertionLevel } from '../cbom/index.js';
+import { ASSERTION_ORDER, gate, type AssertionLevel } from '../cbom/index.js';
 import type { CryptoAsset, Occurrence } from '../types/crypto-asset.js';
 import type { Factor } from '../types/factor.js';
 
@@ -116,12 +116,6 @@ export function diffScans(previous: ScanSnapshot, current: ScanSnapshot): ScanDi
   };
 }
 
-const LEVEL_ORDER: Readonly<Record<AssertionLevel, number>> = {
-  SUSPECTED: 0,
-  OBSERVED: 1,
-  CONFIRMED: 2,
-};
-
 function classify(
   before: OccurrenceSummary | null,
   after: OccurrenceSummary | null,
@@ -140,15 +134,33 @@ function classify(
   }
 
   // Reachability moving is the only change that is unambiguously about the
-  // estate rather than about the scanner.
-  if (before.reachable !== true && after.reachable === true) {
+  // estate rather than about the scanner - and only between two verdicts. `null`
+  // is not `false`: a scan that found no entry point analyzed nothing, so the
+  // next scan that does find one would report the entire estate as REGRESSED at
+  // once, which is the false-positive storm this module exists to avoid.
+  if (before.reachable === false && after.reachable === true) {
     return { kind: 'REGRESSED', reason: 'became reachable from an entry point' };
   }
   if (before.reachable === true && after.reachable === false) {
     return { kind: 'IMPROVED', reason: 'no longer reachable' };
   }
+  if (before.reachable === null && after.reachable !== null) {
+    return {
+      kind: 'RECLASSIFIED',
+      reason: `reachability analyzed for the first time: ${
+        after.reachable ? 'reachable from an entry point' : 'not reached'
+      }`,
+    };
+  }
+  if (before.reachable !== null && after.reachable === null) {
+    return {
+      kind: 'RECLASSIFIED',
+      reason:
+        'reachability verdict lost - nothing to trace from in this scan, which is a coverage question',
+    };
+  }
 
-  const levelDelta = LEVEL_ORDER[after.assertionLevel] - LEVEL_ORDER[before.assertionLevel];
+  const levelDelta = ASSERTION_ORDER[after.assertionLevel] - ASSERTION_ORDER[before.assertionLevel];
   if (levelDelta !== 0) {
     // Deliberately NOT called a regression. Nothing about the estate changed;
     // corroborating evidence arrived, or was lost.

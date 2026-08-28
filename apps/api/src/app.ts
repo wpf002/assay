@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -55,12 +56,50 @@ export interface AppOptions {
   readonly logger?: boolean;
 }
 
+/**
+ * An unknown pack id is bad input, not a server fault. `loadPack` throws a
+ * bare Error, which Fastify has no choice but to report as a 500, so the id is
+ * checked here where it can be a 400 naming the same packs loadPack would.
+ */
+const PackId = z.string().refine(
+  (id) => listPacks().includes(id),
+  (id) => ({ message: `unknown policy pack "${id}". available: ${listPacks().join(', ')}` }),
+);
+
+/**
+ * X, the operator-supplied secrecy lifetime.
+ *
+ * An empty query value is a missing value, not zero. `Number('')` is 0 and
+ * passes `min(0)`, so `?secrecyYears=` silently replaced the documented
+ * default with an assertion that nothing this system protects needs to stay
+ * secret for a single year - and it flips the binding constraint.
+ */
+const SecrecyYears = z.preprocess(
+  (v) => (v === '' ? undefined : v),
+  z.coerce.number().min(0).max(100).default(5),
+);
+
+/**
+ * A boolean query flag.
+ *
+ * `z.coerce.boolean()` is `Boolean(value)`, and every non-empty query string
+ * is truthy - including "false". A caller who asks a CBOM to exclude SUSPECTED
+ * findings has to actually get a CBOM without them.
+ */
+const QueryFlag = z
+  .enum(['true', 'false', '1', '0', ''])
+  .transform((v) => v === 'true' || v === '1')
+  .default('false');
+
 const RankQuery = z.object({
-  pack: z.string().default(DEFAULT_PACK_ID),
-  secrecyYears: z.coerce.number().min(0).max(100).default(5),
+  pack: PackId.default(DEFAULT_PACK_ID),
+  secrecyYears: SecrecyYears,
   now: z.string().datetime().optional(),
   track: z.enum(['CONFIDENTIALITY', 'AUTHENTICITY']).optional(),
 });
+
+/** The estate is ranked against a trace bundle; the default is the newest one. */
+const EstateQuery = RankQuery.extend({ traces: z.string().default('latest') });
 
 export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ?? false });
@@ -68,6 +107,22 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, { origin: true });
+
+  /**
+   * A rejected query is the caller's fault, not ours.
+   *
+   * A ZodError carries no statusCode, so Fastify's default handler reports
+   * every malformed query parameter as a 500: it pages whoever is on call, it
+   * pollutes the error budget, and it tells the caller to retry a request that
+   * can never succeed. The POST routes already answer 400 by hand; this is the
+   * same contract for the routes that parse with `.parse`.
+   */
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof z.ZodError) {
+      return reply.code(400).send({ error: 'invalid query', issues: error.issues });
+    }
+    return reply.send(error);
+  });
 
   app.get('/health', async () => ({ ok: true, store: store.kind }));
 
@@ -115,8 +170,13 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   app.get('/scans', async (request) => {
-    const q = z.object({ system: z.string().optional() }).parse(request.query);
-    return store.list(q.system);
+    const q = z
+      .object({
+        system: z.string().optional(),
+        limit: z.coerce.number().min(1).max(500).default(100),
+      })
+      .parse(request.query);
+    return store.list(q.system, q.limit);
   });
 
   app.get('/scans/:id', async (request, reply) => {
@@ -147,13 +207,11 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   app.get('/scans/:id/rerank', async (request, reply) => {
     const scan = await store.get((request.params as { id: string }).id);
     if (scan === null) return reply.code(404).send({ error: 'no such scan' });
-    const q = z
-      .object({
-        from: z.string().default(DEFAULT_PACK_ID),
-        to: z.string(),
-        secrecyYears: z.coerce.number().default(5),
-        now: z.string().datetime().optional(),
-      })
+    // Derived from RankQuery rather than redeclared, so the one endpoint whose
+    // job is attributing differences to policy cannot be handed an X the rest
+    // of the API rejects.
+    const q = RankQuery.omit({ pack: true, track: true })
+      .extend({ from: PackId.default(DEFAULT_PACK_ID), to: PackId })
       .parse(request.query);
 
     const before = rankScan(scan, { ...q, pack: q.from });
@@ -175,61 +233,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     if (occurrence === undefined) return reply.code(404).send({ error: 'no such occurrence' });
 
     const q = RankQuery.parse(request.query);
-    const asset = scan.assets.find((a) => a.id === occurrence.assetId) ?? null;
-    const ranked = rankScan(scan, q);
-    const pack = loadPack(q.pack);
-    const row = [...ranked.confidentiality, ...ranked.authenticity, ...ranked.unreached, ...ranked.hints]
-      .find((f) => f.occurrenceId === occurrence.id);
-    const g = gate(occurrence);
-
-    return {
-      occurrence: { ...occurrence, confidence: Number(occurrence.confidence.value) },
-      asset,
-      assertionLevel: g.assertionLevel,
-      downgradeReason: g.downgradeReason,
-      blockedBy: blockers(occurrence.confidence),
-      evidence: occurrence.evidence,
-      derivations: {
-        confidence: {
-          tree: explain(occurrence.confidence, 'confidence'),
-          depth: derivationDepth(occurrence.confidence),
-          citations: citations(occurrence.confidence).length,
-          // Structured, so the UI can explain the ceilings in words instead of
-          // parsing them back out of a label string.
-          value: Number(occurrence.confidence.value),
-          groups: computeConfidenceBreakdown(occurrence.evidence).groups,
-        },
-        mosca:
-          row === undefined
-            ? null
-            : {
-                tree: explain(row.mosca.factor, 'mosca'),
-                depth: derivationDepth(row.mosca.factor),
-                bindingConstraint: row.bindingConstraint,
-                x: row.mosca.x,
-                y: row.mosca.y,
-                crqc: row.mosca.crqc,
-                regulatory: row.mosca.regulatory,
-                controlClass: row.controlClass,
-                track: row.track,
-                policy: {
-                  packId: ranked.policyPackId,
-                  packVersion: ranked.policyPackVersion,
-                  crqcYear: pack.crqcYear,
-                  authority: pack.regulatoryAuthority,
-                },
-              },
-        reachability:
-          occurrence.reachability === null
-            ? null
-            : {
-                tree: explain(occurrence.reachability.factor, 'reachability'),
-                via: occurrence.reachability.via,
-                entryPoint: occurrence.reachability.entryPoint,
-                path: occurrence.reachability.path,
-              },
-      },
-    };
+    return derivation(occurrence, scan.assets, rankScan(scan, q), q.pack);
   });
 
   /**
@@ -239,20 +243,32 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
    * every system merged - so a row opened there had nowhere to send its
    * request. Occurrence ids are stable content hashes, so the lookup is just
    * "find it across the current estate".
+   *
+   * It ranks the whole estate, exactly as /estate/worklists does, rather than
+   * ranking the owning scan alone. Those are two different sums: the estate
+   * clock is the newest scan of any system, not this scan's own start, and
+   * reachability here is the trace-correlated one. Ranking the owner by itself
+   * is how a row could read "overdue by five years" in the list and "eleven
+   * years of margin" when it was clicked.
    */
   app.get('/estate/occurrences/:occId', async (request, reply) => {
     const { occId } = request.params as { occId: string };
+    const q = EstateQuery.parse(request.query);
     const scans = await store.latestPerSystem();
-    const owner = scans.find((s) => s.occurrences.some((o) => o.id === occId));
-    if (owner === undefined) return reply.code(404).send({ error: 'no such occurrence in the estate' });
-    // Delegate to the per-scan handler so there is exactly one implementation
-    // of the derivation response.
-    const query = new URLSearchParams(request.query as Record<string, string>).toString();
-    const inner = await app.inject({
-      method: 'GET',
-      url: `/scans/${owner.id}/occurrences/${encodeURIComponent(occId)}${query === '' ? '' : `?${query}`}`,
-    });
-    return reply.code(inner.statusCode).send(inner.json());
+    if (scans.length === 0) {
+      return reply.code(404).send({ error: 'no such occurrence in the estate' });
+    }
+    const bundle = await resolveTraces(store, q.traces);
+    if (bundle === null && q.traces !== 'latest') {
+      return reply.code(404).send({ error: 'no such trace bundle' });
+    }
+
+    const estate = rankEstate(scans, bundle, q);
+    const occurrence = estate.occurrences.find((o) => o.id === occId);
+    if (occurrence === undefined) {
+      return reply.code(404).send({ error: 'no such occurrence in the estate' });
+    }
+    return derivation(occurrence, estate.assets, estate.worklists, q.pack);
   });
 
   app.get('/scans/:id/cbom', async (request, reply) => {
@@ -261,8 +277,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     const q = z
       .object({
         profile: z.enum(['cyclonedx-1.7', 'cyclonedx-1.6', 'cisa-min-elements']).default('cyclonedx-1.7'),
-        includeSuspected: z.coerce.boolean().default(false),
-        factors: z.coerce.boolean().default(false),
+        includeSuspected: QueryFlag,
+        factors: QueryFlag,
       })
       .parse(request.query);
 
@@ -288,6 +304,17 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     let previous: StoredScan | null;
     if (q.from !== undefined) {
       previous = await store.get(q.from);
+      // Occurrence ids are content hashes of (system, asset, control class),
+      // so two systems share none of them and the diff degenerates into every
+      // row appearing and every row disappearing - a changelog of nothing,
+      // presented as a regression report. The default branch is scoped to the
+      // system and ordered by construction; an explicit `from` has to be too.
+      if (previous !== null && previous.systemName !== current.systemName) {
+        return reply.code(400).send({ error: 'that scan is of a different system' });
+      }
+      if (previous !== null && previous.startedAt >= current.startedAt) {
+        return reply.code(400).send({ error: 'that scan is not earlier than this one' });
+      }
     } else {
       const recent = await store.recent(current.systemName, 10);
       previous = recent.find((s) => s.startedAt < current.startedAt) ?? null;
@@ -380,8 +407,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     }
 
     const graph = buildServiceGraph({ from, to, source, spans });
-    const stored: StoredTraceBundle = {
-      id: traceId(source, from, to, spans.length),
+    const derived: Omit<StoredTraceBundle, 'id'> = {
       source,
       // A window is needed to store the bundle; "unstated" is preserved in the
       // source string rather than silently becoming now().
@@ -397,6 +423,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
         operation: e.operation,
       })),
     };
+    const stored: StoredTraceBundle = { id: traceId(from, derived), ...derived };
     await store.putTraces(stored);
 
     return reply.code(201).send({
@@ -428,26 +455,20 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
    * the estate shows the RSA key that every payment depends on.
    */
   app.get('/estate/worklists', async (request, reply) => {
-    const q = RankQuery.extend({ traces: z.string().default('latest') }).parse(request.query);
+    const q = EstateQuery.parse(request.query);
     const scans = await store.latestPerSystem();
     if (scans.length === 0) return reply.code(404).send({ error: 'no scans' });
 
     const bundle = await resolveTraces(store, q.traces);
-    const merged = mergeScans(scans);
-    const promoted = bundle === null
-      ? merged.occurrences
-      : applyTraceReachability(merged.occurrences, {
-          rootSystems: [...bundle.rootServices, ...selfReachableSystems(merged.occurrences)],
-          graph: graphOf(bundle),
-        });
-
-    const pack = loadPack(q.pack);
-    const now = q.now === undefined ? new Date(newestStart(scans)) : new Date(q.now);
-    const worklists = rank(promoted, merged.assets, {
-      policy: pack,
-      currentYear: decimalYear(now),
-      secrecyLifetime: () => ({ years: q.secrecyYears, assumed: true }),
-    });
+    // An id that resolves to nothing is a typo or a bundle that has been
+    // replaced, and answering it with the un-correlated estate says the
+    // signing service is a library nobody calls - the exact reading this
+    // endpoint exists to prevent. `latest` against a store with no traces is
+    // the one honest null: nothing was uploaded to correlate against.
+    if (bundle === null && q.traces !== 'latest') {
+      return reply.code(404).send({ error: 'no such trace bundle' });
+    }
+    const estate = rankEstate(scans, bundle, q);
 
     return {
       systems: scans.map((s) => ({ systemName: s.systemName, scanId: s.id, startedAt: s.startedAt })),
@@ -461,8 +482,8 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
               edges: bundle.edges.length,
               rootServices: bundle.rootServices,
             },
-      promotedBySystem: bundle === null ? [] : promotedSystems(merged.occurrences, promoted),
-      worklists,
+      promotedBySystem: bundle === null ? [] : promotedSystems(estate.merged, estate.occurrences),
+      worklists: estate.worklists,
     };
   });
 
@@ -477,7 +498,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     const bundle = await resolveTraces(store, q.traces);
     if (bundle === null) return reply.code(404).send({ error: 'no trace bundle' });
 
-    const scanned = new Set((await store.latestPerSystem()).map((s) => s.systemName));
+    const scanned = new Set(await store.latestSystemNames());
     const services = new Set<string>();
     for (const e of bundle.edges) {
       services.add(e.from);
@@ -507,6 +528,50 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
 async function resolveTraces(store: ScanStore, id: string): Promise<StoredTraceBundle | null> {
   return id === 'latest' ? store.latestTraces() : store.getTraces(id);
+}
+
+interface RankedEstate {
+  /** The merged estate before trace promotion, for reporting what moved. */
+  readonly merged: readonly Occurrence[];
+  readonly occurrences: readonly Occurrence[];
+  readonly assets: readonly CryptoAsset[];
+  readonly worklists: Worklists;
+}
+
+/**
+ * The estate as one ranked unit.
+ *
+ * Both estate routes go through here so the list and the drill-down of a row
+ * in it cannot disagree. The clock is the newest scan in the estate rather
+ * than each scan's own start: ranking a 2020 scan against 2020 and the estate
+ * against 2030 gives the same finding two different deadlines, and the row the
+ * whole product exists to make clickable would contradict itself when clicked.
+ */
+function rankEstate(
+  scans: readonly StoredScan[],
+  bundle: StoredTraceBundle | null,
+  q: z.infer<typeof EstateQuery>,
+): RankedEstate {
+  const merged = mergeScans(scans);
+  const promoted =
+    bundle === null
+      ? merged.occurrences
+      : applyTraceReachability(merged.occurrences, {
+          rootSystems: [...bundle.rootServices, ...selfReachableSystems(merged.occurrences)],
+          graph: graphOf(bundle),
+        });
+  const now = q.now === undefined ? new Date(newestStart(scans)) : new Date(q.now);
+
+  return {
+    merged: merged.occurrences,
+    occurrences: promoted,
+    assets: merged.assets,
+    worklists: rank(promoted, merged.assets, {
+      policy: loadPack(q.pack),
+      currentYear: decimalYear(now),
+      secrecyLifetime: () => ({ years: q.secrecyYears, assumed: true }),
+    }),
+  };
 }
 
 function graphOf(bundle: StoredTraceBundle): ServiceGraph {
@@ -579,10 +644,44 @@ function isoOr(value: string, request: { id?: unknown }): string {
   return Number.isFinite(t) ? new Date(t).toISOString() : new Date(0).toISOString();
 }
 
-function traceId(source: string, from: string, to: string, spanCount: number): string {
-  const slug = source.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24);
-  const stamp = `${from}-${to}-${spanCount}`.replace(/[^0-9]/g, '').slice(0, 16);
-  return `${slug || 'traces'}-${stamp}`;
+/**
+ * A bundle id has to separate two uploads a human would call the same one.
+ *
+ * The window stamp alone could not: a full-precision ISO `from` supplies more
+ * digits than the stamp holds, so `to` and the span count never reached the
+ * id and every bundle a backend uploaded for one window collapsed onto a
+ * single id - and an OTLP export, whose window is "unstated", collapsed onto
+ * source plus span count. One of the two bundles was then unrecoverable, and
+ * which one depended on the store: memory overwrites, Postgres upserts and
+ * keeps the first while the 201 describes the second.
+ *
+ * So the derived graph is hashed in behind the readable stamp. Re-uploading
+ * the same export still lands on the same id, which is what makes putTraces an
+ * idempotent upsert rather than a destructive one.
+ */
+function traceId(statedFrom: string, bundle: Omit<StoredTraceBundle, 'id'>): string {
+  const slug = bundle.source
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 24);
+  // The stated window rather than the stored one, so an OTLP export says
+  // "unstated" instead of claiming it covers 1970.
+  const stamp = statedFrom.replace(/[^0-9]/g, '').slice(0, 14) || 'unstated';
+  const digest = createHash('sha256')
+    .update(
+      JSON.stringify([
+        bundle.source,
+        bundle.windowFrom,
+        bundle.windowTo,
+        bundle.spanCount,
+        bundle.rootServices,
+        bundle.edges,
+      ]),
+    )
+    .digest('hex')
+    .slice(0, 12);
+  return `${slug || 'traces'}-${stamp}-${digest}`;
 }
 
 /* -------------------------------------------------------------------- utils */
@@ -595,6 +694,84 @@ function rankScan(scan: StoredScan, q: z.infer<typeof RankQuery>): Worklists {
     currentYear: decimalYear(now),
     secrecyLifetime: () => ({ years: q.secrecyYears, assumed: true }),
   });
+}
+
+/**
+ * One finding, walked from its ranked row down to raw evidence.
+ *
+ * Shared by the per-scan and the estate drill-down so there is exactly one
+ * implementation of the derivation response. The worklists are passed in
+ * rather than computed here because who ranked them, and against which clock
+ * and which reachability, is the caller's decision.
+ */
+function derivation(
+  occurrence: Occurrence,
+  assets: readonly CryptoAsset[],
+  ranked: Worklists,
+  packId: string,
+) {
+  const asset = assets.find((a) => a.id === occurrence.assetId) ?? null;
+  const pack = loadPack(packId);
+  // Every bucket rank() can return. A row missing from this list reports no
+  // MOSCA derivation at all, which reads as "there is no deadline" rather than
+  // "we did not look here".
+  const row = [
+    ...ranked.confidentiality,
+    ...ranked.authenticity,
+    ...ranked.unreached,
+    ...ranked.unanalyzed,
+    ...ranked.hints,
+  ].find((f) => f.occurrenceId === occurrence.id);
+  const g = gate(occurrence);
+
+  return {
+    occurrence: { ...occurrence, confidence: Number(occurrence.confidence.value) },
+    asset,
+    assertionLevel: g.assertionLevel,
+    downgradeReason: g.downgradeReason,
+    blockedBy: blockers(occurrence.confidence),
+    evidence: occurrence.evidence,
+    derivations: {
+      confidence: {
+        tree: explain(occurrence.confidence, 'confidence'),
+        depth: derivationDepth(occurrence.confidence),
+        citations: citations(occurrence.confidence).length,
+        // Structured, so the UI can explain the ceilings in words instead of
+        // parsing them back out of a label string.
+        value: Number(occurrence.confidence.value),
+        groups: computeConfidenceBreakdown(occurrence.evidence).groups,
+      },
+      mosca:
+        row === undefined
+          ? null
+          : {
+              tree: explain(row.mosca.factor, 'mosca'),
+              depth: derivationDepth(row.mosca.factor),
+              bindingConstraint: row.bindingConstraint,
+              x: row.mosca.x,
+              y: row.mosca.y,
+              crqc: row.mosca.crqc,
+              regulatory: row.mosca.regulatory,
+              controlClass: row.controlClass,
+              track: row.track,
+              policy: {
+                packId: ranked.policyPackId,
+                packVersion: ranked.policyPackVersion,
+                crqcYear: pack.crqcYear,
+                authority: pack.regulatoryAuthority,
+              },
+            },
+      reachability:
+        occurrence.reachability === null
+          ? null
+          : {
+              tree: explain(occurrence.reachability.factor, 'reachability'),
+              via: occurrence.reachability.via,
+              entryPoint: occurrence.reachability.entryPoint,
+              path: occurrence.reachability.path,
+            },
+    },
+  };
 }
 
 function toSnapshot(scan: StoredScan) {
@@ -653,7 +830,23 @@ function describe(f: Worklists['confidentiality'][number], scan: StoredScan): st
   return lines.join('\n');
 }
 
+/**
+ * Readable, and never shared by two scans.
+ *
+ * The readable half is lossy in both directions: the stamp truncates at whole
+ * seconds while an ingest may carry milliseconds, and the slug collapses
+ * "a-b", "a_b" and "A B" to one string. Two distinct scans landing on one id
+ * meant the memory store silently dropped the earlier one and Postgres
+ * rejected the write as a duplicate key - and `assay push` twice in one second
+ * is enough to reach it. The exact inputs are hashed in behind the stamp so
+ * the id stays deterministic without pretending the stamp is unique.
+ */
 function scanId(systemName: string, startedAt: string): string {
   const slug = systemName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return `${slug}-${startedAt.replace(/[-:.TZ]/g, '').slice(0, 14)}`;
+  const stamp = startedAt.replace(/[-:.TZ]/g, '').slice(0, 14);
+  const digest = createHash('sha256')
+    .update(`${systemName}\u0000${startedAt}`)
+    .digest('hex')
+    .slice(0, 8);
+  return `${slug || 'scan'}-${stamp}-${digest}`;
 }

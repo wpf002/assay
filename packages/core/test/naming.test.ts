@@ -56,7 +56,70 @@ describe('one algorithm, many spellings', () => {
   });
 
   it('recognizes a post-quantum SSH KEX as safe', () => {
-    expect(sshAlgorithm('sntrup761x25519-sha512@openssh.com')?.primitive).toBe('ML-KEM');
+    expect(sshAlgorithm('mlkem768x25519-sha256@openssh.com')?.primitive).toBe('ML-KEM');
+  });
+});
+
+describe('post-quantum SSH names name only what they are', () => {
+  it('does not claim sntrup761 is the NIST standard', () => {
+    // Streamlined NTRU Prime carries no FIPS 203 OID and must not corroborate
+    // a vendor roadmap that promises ML-KEM.
+    const spec = sshAlgorithm('sntrup761x25519-sha512@openssh.com');
+    expect(spec?.primitive).toBe('UNKNOWN');
+    expect(spec?.parameters['name']).toBe('sntrup761x25519');
+  });
+
+  it('gives both spellings of one KEM the same parameters', () => {
+    // OpenSSH ships the vendor-suffixed and bare names side by side.
+    expect(sshAlgorithm('sntrup761x25519-sha512')?.parameters).toEqual(
+      sshAlgorithm('sntrup761x25519-sha512@openssh.com')?.parameters,
+    );
+    expect(sshAlgorithm('mlkem768x25519-sha256')?.parameters).toEqual({});
+  });
+});
+
+describe('digests and ciphers the union does not name', () => {
+  it('reads the digest out of an RFC 6668 SSH MAC name', () => {
+    expect(sshAlgorithm('hmac-sha2-256')?.parameters['hash']).toBe('SHA2');
+    expect(sshAlgorithm('hmac-sha2-512-etm@openssh.com')?.parameters['hash']).toBe('SHA2');
+  });
+
+  it('recognizes pyca and Java spellings of 3DES', () => {
+    expect(cipherFromName('TripleDES')?.primitive).toBe('3DES');
+    expect(cipherFromName('des-ede-cbc')?.primitive).toBe('3DES');
+  });
+
+  it('does not report single DES as 3DES', () => {
+    // 3DES claims 112 classical bits; single DES has 56.
+    for (const name of ['DES', 'des-cbc', 'des']) {
+      const spec = cipherFromName(name);
+      expect(spec?.primitive).toBe('UNKNOWN');
+      expect(spec?.parameters['name']).toBe('DES');
+    }
+    expect(cipherFromName('des-cbc')?.parameters['mode']).toBe('CBC');
+  });
+
+  it('names the ciphers that have no primitive of their own rather than dropping them', () => {
+    for (const [name, expected] of [['RC2', 'RC2'], ['Blowfish', 'Blowfish'], ['CAST5', 'CAST5'], ['IDEA', 'IDEA']]) {
+      expect(cipherFromName(name as string)?.parameters['name']).toBe(expected);
+    }
+  });
+});
+
+describe('JOSE key management algorithms stay on the confidentiality track', () => {
+  it('reads RSA-OAEP as OAEP key establishment, not as a PKCS1v15 signature', () => {
+    const specs = joseAlgorithm('RSA-OAEP-256');
+    expect(specs[0]?.purpose).toBe('KEY_ESTABLISHMENT');
+    expect(specs[0]?.parameters['padding']).toBe('OAEP');
+  });
+
+  it('keeps RSA1_5 key transport off the authenticity track', () => {
+    expect(joseAlgorithm('RSA1_5')[0]?.purpose).toBe('KEY_ESTABLISHMENT');
+  });
+
+  it('still reads RS256 as a signature', () => {
+    expect(joseAlgorithm('RS256')[0]?.purpose).toBe('DIGITAL_SIGNATURE');
+    expect(joseAlgorithm('RS256')[0]?.parameters['padding']).toBe('PKCS1v15');
   });
 });
 

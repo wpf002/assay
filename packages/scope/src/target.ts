@@ -60,11 +60,25 @@ function ipv4ToInt(ip: string): number | null {
   return out >>> 0;
 }
 
-function matchCidr4(cidr: string, host: string): boolean {
-  const [network, bitsRaw] = cidr.split('/');
-  if (network === undefined || bitsRaw === undefined) return false;
+/**
+ * Prefix length, or null. Parsed from the digits rather than with `Number`,
+ * because `Number('')` is 0: `10.0.0.0/` would otherwise be a well-formed /0
+ * and match every address in the family. The same trap catches `/ `, `/\t`
+ * and `/+8`, all of which `Number` accepts.
+ */
+function prefixBits(bitsRaw: string, max: number): number | null {
+  if (!/^(0|[1-9]\d{0,2})$/.test(bitsRaw)) return null;
   const bits = Number(bitsRaw);
-  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  return bits > max ? null : bits;
+}
+
+function matchCidr4(cidr: string, host: string): boolean {
+  // A third component means the string is not a CIDR. Dropping it silently
+  // would let `10.0.0.0/8/32` read as one prefix and mean another.
+  const [network, bitsRaw, ...rest] = cidr.split('/');
+  if (network === undefined || bitsRaw === undefined || rest.length > 0) return false;
+  const bits = prefixBits(bitsRaw, 32);
+  if (bits === null) return false;
   const net = ipv4ToInt(network);
   const addr = ipv4ToInt(normalizeHost(host));
   if (net === null || addr === null) return false;
@@ -84,8 +98,12 @@ export function ipv6ToBytes(ip: string): Uint8Array | null {
   let tail: string[] = [];
   if (doubleColons === 1) {
     const [h, t] = addr.split('::');
-    head = (h ?? '').split(':').filter(Boolean);
-    tail = (t ?? '').split(':').filter(Boolean);
+    head = h === undefined || h === '' ? [] : h.split(':');
+    tail = t === undefined || t === '' ? [] : t.split(':');
+    // An empty group is a stray colon, not a group of zeros. Discarding it
+    // lets `:::` parse as `::` and `::1:` as `::1`, so the gate decides on an
+    // address the string does not name to any resolver.
+    if (head.includes('') || tail.includes('')) return null;
   } else {
     head = addr.split(':');
     if (head.length !== 8 && !addr.includes('.')) return null;
@@ -103,12 +121,18 @@ export function ipv6ToBytes(ip: string): Uint8Array | null {
       (v4 & 0xffff).toString(16),
     ];
   };
-  const h2 = expandV4(head);
+  // The dotted quad is only legal as the last group of the whole address, so
+  // the head is expanded only when nothing follows it. Expanding it either way
+  // lets `1.2.3.4::` parse as `102:304::`.
+  const h2 = doubleColons === 1 ? head : expandV4(head);
   const t2 = expandV4(tail);
   if (h2 === null || t2 === null) return null;
 
+  // `::` stands for at least one group of zeros. Allowing zero groups lets
+  // `1:2:3:4:5:6:7::8` parse as `1:2:3:4:5:6:7:8`, so a target and a host that
+  // read as different addresses compare equal.
   const fill = 8 - h2.length - t2.length;
-  if (fill < 0 || (doubleColons === 0 && fill !== 0)) return null;
+  if (doubleColons === 1 ? fill < 1 : fill !== 0) return null;
   const groups = [...h2, ...Array<string>(fill).fill('0'), ...t2];
   if (groups.length !== 8) return null;
 
@@ -124,11 +148,11 @@ export function ipv6ToBytes(ip: string): Uint8Array | null {
 }
 
 function matchCidr6(cidr: string, host: string): boolean {
-  const idx = cidr.lastIndexOf('/');
-  if (idx < 0) return false;
-  const bits = Number(cidr.slice(idx + 1));
-  if (!Number.isInteger(bits) || bits < 0 || bits > 128) return false;
-  const net = ipv6ToBytes(cidr.slice(0, idx));
+  const [network, bitsRaw, ...rest] = cidr.split('/');
+  if (network === undefined || bitsRaw === undefined || rest.length > 0) return false;
+  const bits = prefixBits(bitsRaw, 128);
+  if (bits === null) return false;
+  const net = ipv6ToBytes(network);
   const addr = ipv6ToBytes(host);
   if (net === null || addr === null) return false;
 

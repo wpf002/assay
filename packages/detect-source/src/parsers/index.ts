@@ -45,6 +45,7 @@ const CALL_NODES = new Set([
   'call', // python
   'method_invocation', // java
   'object_creation_expression', // java: new Cipher(...)
+  'new_expression', // ts/js: new SignJWT(...)
   'invocation_expression', // c#
   'macro_invocation', // rust
 ]);
@@ -141,6 +142,7 @@ function dottedName(node: Parser.SyntaxNode | null): string | null {
     case 'attribute':
     case 'selector_expression': // go
     case 'field_expression': // c, cpp, rust
+    case 'field_access': // java: javax.crypto.Cipher.getInstance(...)
     case 'scoped_identifier': // rust, java
     case 'qualified_identifier': // cpp
     case 'member_access_expression': // c#
@@ -161,6 +163,11 @@ function dottedName(node: Parser.SyntaxNode | null): string | null {
       const right = property ? property.text : null;
       return left && right ? `${left}.${right}` : (right ?? left);
     }
+    case 'new_expression':
+      // `new SignJWT({}).setProtectedHeader(...)` - without this the receiver
+      // resolves to nothing and the chained call loses the imported symbol that
+      // every import gate matches on.
+      return dottedName(node.childForFieldName('constructor'));
     case 'call_expression':
     case 'call':
     case 'method_invocation':
@@ -190,6 +197,8 @@ function toCallSite(node: Parser.SyntaxNode, file: string, lang: Lang): CallSite
   } else if (node.type === 'object_creation_expression') {
     const type = dottedName(node.childForFieldName('type'));
     callee = type === null ? null : `new.${type}`;
+  } else if (node.type === 'new_expression') {
+    callee = dottedName(node.childForFieldName('constructor'));
   } else {
     callee = dottedName(
       node.childForFieldName('function') ??
@@ -461,11 +470,27 @@ function collectOtherImports(
     case 'import_declaration': // go, java
     case 'use_declaration': // rust
     case 'using_directive': { // c#
-      record(node.text.replace(/^(import|use|using)\s+/, '').replace(/;$/, ''));
-      // A Go import spec may be aliased: `crypto "crypto/rsa"`.
+      // A Go import spec may be aliased: `cryptorsa "crypto/rsa"`. Recording
+      // the raw spec text instead of the path puts `cryptorsa "crypto/rsa` in
+      // the import set, which no gate can ever match. Go also wraps every spec
+      // in an import_declaration whose own text is that same raw form, so the
+      // declaration defers to the specs underneath it.
       const name = node.childForFieldName('name');
       const path = node.childForFieldName('path');
-      if (name && path) aliases.set(name.text, path.text.replace(/^"|"$/g, ''));
+      if (path) {
+        record(path.text);
+        if (name) aliases.set(name.text, path.text.replace(/^"|"$/g, ''));
+        return;
+      }
+      if (node.namedChild(0)?.type.startsWith('import_spec')) return;
+      record(node.text.replace(/^(import|use|using)\s+/, '').replace(/;$/, ''));
+      return;
+    }
+    case 'use_as_clause': { // rust: `use rsa::RsaPrivateKey as PrivKey;`
+      const path = node.childForFieldName('path');
+      const alias = node.childForFieldName('alias');
+      if (path) record(path.text);
+      if (path && alias) aliases.set(alias.text, path.text);
       return;
     }
     case 'preproc_include': { // c, cpp

@@ -18,6 +18,7 @@ import { importInventory, kmsFindings } from '@assay/detect-kms';
 import { scanBinaries } from '@assay/detect-binary';
 import { decimalYear, loadPack } from '@assay/policy';
 import { loadTraces } from './traces.js';
+import { nowOption, numberOption } from '../options.js';
 
 export interface ScanOptions {
   readonly policy: string;
@@ -41,8 +42,9 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
   const root = resolve(path);
   const systemId = options.system ?? basename(root);
   const pack = loadPack(options.policy);
-  const now = options.now ? new Date(options.now) : new Date();
+  const now = nowOption(options.now);
   const collectedAt = now.toISOString();
+  const secrecyYears = numberOption('--secrecy-years', options.secrecyYears, { min: 0, max: 100 });
 
   const [source, deps, pki, binary] = await Promise.all([
     scanSource({ root, systemId, collectedAt }),
@@ -82,7 +84,6 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
         });
   const assets = assembled.assets;
 
-  const secrecyYears = Number(options.secrecyYears);
   const worklists = rank(occurrences, assets, {
     policy: pack,
     currentYear: decimalYear(now),

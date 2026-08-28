@@ -93,7 +93,19 @@ export function evaluateGate(
   const live = new Map<string, Suppression>();
   const expired: Suppression[] = [];
   const stale: Suppression[] = [];
-  const present = new Set(all.map((f) => f.occurrenceId));
+  // Presence in the estate and presence in the current worklist are different
+  // predicates. A finding that is merely unreached this scan still exists, and
+  // calling its suppression stale or its baseline entry resolved tells the
+  // operator to delete a live risk acceptance - which the next scan that finds
+  // it reachable again then fails the build on, as newly introduced.
+  const present = new Set(
+    [
+      ...all,
+      ...worklists.unreached,
+      ...worklists.unanalyzed,
+      ...worklists.hints,
+    ].map((f) => f.occurrenceId),
+  );
 
   for (const s of baseline?.suppressions ?? []) {
     if (Date.parse(s.expiresAt) <= now) {

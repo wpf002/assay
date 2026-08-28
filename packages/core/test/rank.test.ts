@@ -114,6 +114,26 @@ describe('I5: presence is not exposure', () => {
     expect(w.confidentiality).toHaveLength(1);
     expect(w.confidentiality[0]?.reachable).toBeNull();
   });
+
+  it('keeps findings with no verdict in the worklist when a sibling comes back unreached', () => {
+    // Reachability is decided per occurrence: a certificate has no call site to
+    // trace even after the pass runs. Treating one unreached sibling as proof
+    // the pass is complete drops every finding nobody has looked at.
+    const w = rank(
+      [
+        occ('n1', KEX.id, { controlClass: 'HARDWARE' }),
+        occ('n2', KEX.id, { controlClass: 'HARDWARE' }),
+        occ('n3', KEX.id, { controlClass: 'HARDWARE' }),
+        occ('dead', KEX.id, { reachability: reach(false) }),
+      ],
+      [KEX],
+      OPTS,
+    );
+    expect(w.confidentiality.map((f) => f.occurrenceId)).toEqual(['n1', 'n2', 'n3']);
+    expect(w.unreached.map((f) => f.occurrenceId)).toEqual(['dead']);
+    expect(w.headline.numerator).toBe(3);
+    expect(w.headline.denominator).toBe(3);
+  });
 });
 
 describe('headline metric', () => {

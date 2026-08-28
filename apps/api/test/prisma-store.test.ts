@@ -39,6 +39,7 @@ async function cleanup(): Promise<void> {
     await prisma.scan.deleteMany({ where: { systemName: { startsWith: PREFIX } } });
     await prisma.system.deleteMany({ where: { name: { startsWith: PREFIX } } });
     await prisma.traceBundle.deleteMany({ where: { id: { startsWith: PREFIX } } });
+    await prisma.cryptoAsset.deleteMany({ where: { id: { startsWith: PREFIX } } });
   } finally {
     await prisma.$disconnect();
   }
@@ -86,6 +87,54 @@ maybe('postgres round trip', () => {
       expect(loaded).not.toBeNull();
       expect(loaded?.occurrences.length).toBe(original.occurrences.length);
       expect(cbomOf(loaded as StoredScan)).toBe(cbomOf(original));
+    } finally {
+      await store.close();
+    }
+  }, 120_000);
+
+  it('returns the logical system each occurrence names, not the scan\'s', async () => {
+    const store = PrismaScanStore.fromUrl(url as string);
+    try {
+      // The fixture's occurrences belong to system "sample" while the scan is
+      // filed under a prefixed name, which is the ordinary shape once a scan
+      // covers more than one logical system. Trace correlation and ticket
+      // export both key off the occurrence's own value.
+      const original = await fixtureScan(`sys-${Date.now().toString(36)}`);
+      await store.put(original);
+      const loaded = await store.get(original.id);
+      expect(loaded?.occurrences[0]?.systemId).toBe(original.occurrences[0]?.systemId);
+      expect(loaded?.occurrences.every((o) => o.systemId === 'sample')).toBe(true);
+    } finally {
+      await store.close();
+    }
+  }, 120_000);
+
+  it('returns every asset the scan declared, including one no occurrence uses', async () => {
+    const store = PrismaScanStore.fromUrl(url as string);
+    try {
+      const base = await fixtureScan(`orphan-${Date.now().toString(36)}`);
+      // A quantum-safe inventory entry with no work item behind it is still
+      // part of what the scan reported.
+      const original: StoredScan = {
+        ...base,
+        assets: [
+          ...base.assets,
+          {
+            id: `${PREFIX}unreferenced`,
+            primitive: 'ML-KEM',
+            parameters: { parameterSet: 'ML-KEM-768' },
+            purpose: 'KEY_ESTABLISHMENT',
+            quantumVulnerable: false,
+            classicalSecurityBits: null,
+            nistQuantumSecurityLevel: 3,
+            oid: null,
+          },
+        ],
+      };
+      await store.put(original);
+      const loaded = await store.get(original.id);
+      expect(loaded?.assets.length).toBe(original.assets.length);
+      expect(loaded?.assets.some((a) => a.id === `${PREFIX}unreferenced`)).toBe(true);
     } finally {
       await store.close();
     }
@@ -156,6 +205,30 @@ maybe('trace persistence', () => {
       // The count survives; the spans do not, and there is no column that
       // could hold them.
       expect(JSON.stringify(loaded)).not.toContain('spanId');
+    } finally {
+      await store.close();
+    }
+  }, 120_000);
+
+  it('lists a bundle with its edge count, the same shape the memory store lists', async () => {
+    const store = PrismaScanStore.fromUrl(url as string);
+    try {
+      const id = `${PREFIX}count-${Date.now().toString(36)}`;
+      await store.putTraces({
+        id,
+        source: 'tempo',
+        windowFrom: '2026-08-27T00:00:00.000Z',
+        windowTo: '2026-08-28T00:00:00.000Z',
+        ingestedAt: '2026-08-28T00:00:00.000Z',
+        spanCount: 4,
+        rootServices: ['gateway'],
+        edges: [
+          { from: 'gateway', to: 'payments', observations: 12, operation: 'Payments/Create' },
+          { from: 'payments', to: 'signing', observations: 12, operation: 'Signer/Sign' },
+        ],
+      });
+      const listed = (await store.listTraces()).find((b) => b.id === id);
+      expect(listed?.edgeCount).toBe(2);
     } finally {
       await store.close();
     }

@@ -55,8 +55,8 @@ const SHA512_K = hex(`
 /** SHA-1 initial state H0..H4 plus its first round constant. */
 const SHA1_H = hex('67452301efcdab8998badcfe10325476c3d2e1f05a827999');
 
-/** MD5 T-table first four entries (little-endian, as emitted by most compilers). */
-const MD5_T = hex('78a46ad7566c0db5db70202498ec4bc1');
+/** MD5 T-table first four entries T[1..4] = floor(2^32 * abs(sin i)), big-endian. */
+const MD5_T = hex('d76aa478e8c7b756242070dbc1bdceee');
 
 /** NIST P-256 field prime p, big-endian (SEC 2, secp256r1). */
 const P256_PRIME = hex('ffffffff00000001000000000000000000000000ffffffffffffffffffffffff');
@@ -75,8 +75,8 @@ const X25519_BASEPOINT = hex('09000000000000000000000000000000000000000000000000
 /** ChaCha20 "expand 32-byte k" sigma constant. */
 const CHACHA_SIGMA = new TextEncoder().encode('expand 32-byte k');
 
-/** DES SP-box / permuted-choice table opening, present in every 3DES build. */
-const DES_PC1 = hex('39313329211911013a3232322a221a02');
+/** DES permuted choice 1, first 16 entries (FIPS 46-3), one byte per bit index. */
+const DES_PC1 = hex('39312921191109013a322a221a120a02');
 
 const SPECIFIED: readonly ConstantSignature[] = [
   {
@@ -120,7 +120,8 @@ const SPECIFIED: readonly ConstantSignature[] = [
     parameters: { outputLength: 128 },
     purpose: 'INTEGRITY',
     bytes: MD5_T,
-    rationale: 'MD5 T-table T[1..4], derived from abs(sin(i)); little-endian as compilers emit it.',
+    rationale: 'MD5 T-table T[1..4], derived from abs(sin(i)). Specification (big-endian) word order.',
+    wordSize: 4,
   },
   {
     id: 'p256-prime',
@@ -171,7 +172,9 @@ const SPECIFIED: readonly ConstantSignature[] = [
     parameters: {},
     purpose: 'DATA_ENCRYPTION',
     bytes: DES_PC1,
-    rationale: 'DES permuted choice 1 table opening, present in every 3DES implementation.',
+    rationale:
+      'DES permuted choice 1, first 16 entries, FIPS 46-3. Present wherever the key schedule is ' +
+      'computed rather than shipped precomputed.',
   },
 ];
 

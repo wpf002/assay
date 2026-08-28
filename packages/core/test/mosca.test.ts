@@ -108,6 +108,49 @@ describe('regulatory vs physics constraint', () => {
   });
 });
 
+describe('rounding is presentation, not a term in the decision', () => {
+  it('calls a finding late when the raw horizon has passed, whatever the figure prints as', () => {
+    // Z = 4.998, X + Y = 5. Rounding Z to 2 d.p. first reads 5 - 5 and reports
+    // a finding ~18 hours overdue as on time.
+    const r = scoreMosca({
+      purpose: 'KEY_ESTABLISHMENT',
+      controlClass: 'SELF',
+      secrecyLifetimeYears: 2,
+      currentYear: 2026,
+      policy: {
+        ...PHYSICS_ONLY,
+        crqcYear: 2030.998,
+        migrationYearsByControl: { ...EO.migrationYearsByControl, SELF: 3 },
+      },
+    });
+    expect(r.crqc.horizonYears).toBe(5);
+    expect(r.crqc.late).toBe(true);
+    expect(r.late).toBe(true);
+  });
+
+  it('names the binding constraint on raw slack, so late is never read off the constraint that holds', () => {
+    // Both slacks round to 0, one either side of it. On the rounded figures the
+    // <= tie-break hands binding to REGULATORY, whose deadline is not missed,
+    // and the violated physics constraint disappears from the result.
+    const r = scoreMosca({
+      purpose: 'KEY_ESTABLISHMENT',
+      controlClass: 'SELF',
+      secrecyLifetimeYears: 2,
+      currentYear: 2026,
+      policy: {
+        ...EO,
+        crqcYear: 2031,
+        regulatoryDeadlines: { CONFIDENTIALITY: 2029.008, AUTHENTICITY: 2032 },
+        migrationYearsByControl: { ...EO.migrationYearsByControl, SELF: 3.004 },
+      },
+    });
+    expect(r.crqc.late).toBe(true);
+    expect(r.regulatory?.late).toBe(false);
+    expect(r.bindingConstraint).toBe('CRQC');
+    expect(r.late).toBe(true);
+  });
+});
+
 describe('provenance', () => {
   it('marks an operator-supplied secrecy lifetime as an ASSUMPTION', () => {
     const r = scoreMosca({

@@ -100,6 +100,13 @@ export function verifyGrant(grant: unknown, publicKeyPem: string): VerifiedGrant
   } catch {
     throw new ScopeError('verification key is not a usable public key', 'MALFORMED');
   }
+  // A key-agreement key (X25519, X448) is a perfectly valid public key that
+  // `verify` cannot use: it throws a raw OpenSSL error instead of returning
+  // false, so an operator who points --pubkey at the wrong file gets a library
+  // message where the code expects a classified one.
+  if (key.asymmetricKeyType !== 'ed25519') {
+    throw new ScopeError('verification key is not an Ed25519 public key', 'MALFORMED');
+  }
 
   let signatureBytes: Buffer;
   try {
@@ -138,8 +145,13 @@ export function authorize(
   now: Date,
   opts: AuthorizeOptions = {},
 ): AuthorizedTarget {
-  const skewMs =
-    Math.min(Math.max(opts.clockSkewSeconds ?? 0, 0), MAX_CLOCK_SKEW_SECONDS) * 1000;
+  // NaN survives the clamp - Math.max and Math.min both propagate it - and a
+  // NaN skew makes both window comparisons below false, so an expired grant
+  // authorizes. A mistyped `--clock-skew-seconds 60s` is exactly that value.
+  const requestedSkew = opts.clockSkewSeconds ?? 0;
+  const skewMs = Number.isFinite(requestedSkew)
+    ? Math.min(Math.max(requestedSkew, 0), MAX_CLOCK_SKEW_SECONDS) * 1000
+    : 0;
   const t = now.getTime();
 
   if (t + skewMs < Date.parse(grant.notBefore)) {

@@ -118,6 +118,10 @@ function parseElf(data: Buffer): BinaryInfo {
 
   const symbols = new Set<string>();
   const libraries = new Set<string>();
+  // A section whose declared size runs past EOF leaves the loops below with
+  // less than they were told to read. Reporting that as a complete parse turns
+  // "no AES symbol here" into evidence of absence, which it is not.
+  let incomplete = false;
 
   // SHT_SYMTAB = 2, SHT_DYNSYM = 11.
   for (const section of sections) {
@@ -128,7 +132,10 @@ function parseElf(data: Buffer): BinaryInfo {
     const count = Math.floor(section.size / entsize);
     for (let i = 0; i < count && i < 200_000; i++) {
       const off = section.offset + i * entsize;
-      if (off + 4 > data.byteLength) break;
+      if (off + 4 > data.byteLength) {
+        incomplete = true;
+        break;
+      }
       const nameOff = u32(off);
       if (nameOff === 0) continue;
       const name = cstr(data, strtab.offset + nameOff);
@@ -142,7 +149,10 @@ function parseElf(data: Buffer): BinaryInfo {
   if (dynamic !== undefined && dynstr !== undefined) {
     const step = is64 ? 16 : 8;
     for (let off = dynamic.offset; off + step <= dynamic.offset + dynamic.size; off += step) {
-      if (off + step > data.byteLength) break;
+      if (off + step > data.byteLength) {
+        incomplete = true;
+        break;
+      }
       const tag = uN(off);
       if (tag === 0) break;
       if (tag === 1) libraries.add(cstr(data, dynstr.offset + uN(off + step / 2)));
@@ -154,7 +164,7 @@ function parseElf(data: Buffer): BinaryInfo {
     arch,
     symbols: [...symbols].sort(),
     linkedLibraries: [...libraries].filter(Boolean).sort(),
-    truncated: false,
+    truncated: incomplete,
   };
 }
 
@@ -167,6 +177,23 @@ const MACHO_ARCH: Readonly<Record<number, string>> = {
   0x0100000c: 'arm64',
 };
 
+/**
+ * Load commands that carry a dylib name.
+ *
+ * The weak, re-exported and upward variants all have LC_REQ_DYLD (0x80000000)
+ * set, so the bare numbers never appear in a file and matching them missed
+ * every weakly linked library - two of them in /usr/bin/ssh alone. Bare 0x1f is
+ * LC_PREBIND_CKSUM, whose cksum field is not a name offset, so it is not here.
+ */
+const DYLIB_COMMANDS: ReadonlySet<number> = new Set([
+  0x0c, // LC_LOAD_DYLIB
+  0x0d, // LC_ID_DYLIB
+  0x20, // LC_LAZY_LOAD_DYLIB
+  0x80000018, // LC_LOAD_WEAK_DYLIB
+  0x8000001f, // LC_REEXPORT_DYLIB
+  0x80000023, // LC_LOAD_UPWARD_DYLIB
+]);
+
 function parseMachO(data: Buffer): BinaryInfo {
   const be = data.readUInt32BE(0);
   if (be === 0xcafebabe || be === 0xcafebabf) {
@@ -175,20 +202,37 @@ function parseMachO(data: Buffer): BinaryInfo {
     const wide = be === 0xcafebabf;
     const count = data.readUInt32BE(4);
     const merged: BinaryInfo[] = [];
+    // A slice that was skipped or that failed leaves the union short. Without
+    // this the empty result reads as a successfully parsed universal binary
+    // containing no cryptography, which is what a clean one looks like too.
+    let incomplete = false;
     for (let i = 0; i < count && i < 32; i++) {
       const entry = 8 + i * (wide ? 32 : 20);
-      if (entry + (wide ? 32 : 20) > data.byteLength) break;
+      if (entry + (wide ? 32 : 20) > data.byteLength) {
+        incomplete = true;
+        break;
+      }
       const offset = wide ? Number(data.readBigUInt64BE(entry + 8)) : data.readUInt32BE(entry + 8);
       const size = wide ? Number(data.readBigUInt64BE(entry + 16)) : data.readUInt32BE(entry + 12);
-      if (offset + size > data.byteLength) continue;
-      merged.push(parseMachO(data.subarray(offset, offset + size)));
+      if (offset + size > data.byteLength) {
+        incomplete = true;
+        continue;
+      }
+      try {
+        merged.push(parseMachO(data.subarray(offset, offset + size)));
+      } catch {
+        // One padding or garbage slice must degrade only itself. Letting it
+        // unwind discards the symbols already read out of the valid slices
+        // beside it and turns a real finding into 'unparseable'.
+        incomplete = true;
+      }
     }
     return {
       format: 'macho',
       arch: merged.map((m) => m.arch).join('+') || 'universal',
       symbols: [...new Set(merged.flatMap((m) => m.symbols))].sort(),
       linkedLibraries: [...new Set(merged.flatMap((m) => m.linkedLibraries))].sort(),
-      truncated: merged.some((m) => m.truncated),
+      truncated: incomplete || merged.some((m) => m.truncated),
     };
   }
 
@@ -200,11 +244,20 @@ function parseMachO(data: Buffer): BinaryInfo {
 
   const symbols = new Set<string>();
   const libraries = new Set<string>();
+  let incomplete = false;
 
-  for (let i = 0; i < ncmds && offset + 8 <= data.byteLength; i++) {
+  for (let i = 0; i < ncmds; i++) {
+    if (offset + 8 > data.byteLength) {
+      incomplete = true;
+      break;
+    }
     const cmd = data.readUInt32LE(offset);
     const cmdsize = data.readUInt32LE(offset + 4);
-    if (cmdsize < 8 || offset + cmdsize > data.byteLength) break;
+    if (cmdsize < 8) break;
+    if (offset + cmdsize > data.byteLength) {
+      incomplete = true;
+      break;
+    }
 
     if (cmd === 0x02) {
       // LC_SYMTAB
@@ -214,14 +267,17 @@ function parseMachO(data: Buffer): BinaryInfo {
       const nlistSize = is64 ? 16 : 12;
       for (let s = 0; s < nsyms && s < 200_000; s++) {
         const n = symoff + s * nlistSize;
-        if (n + nlistSize > data.byteLength) break;
+        if (n + nlistSize > data.byteLength) {
+          incomplete = true;
+          break;
+        }
         const strx = data.readUInt32LE(n);
         if (strx === 0) continue;
         const name = cstr(data, stroff + strx);
         if (name !== '') symbols.add(name.replace(/^_/, ''));
       }
-    } else if (cmd === 0x0c || cmd === 0x0d || cmd === 0x1f || cmd === 0x20) {
-      // LC_LOAD_DYLIB and friends: the name is at an offset within the command.
+    } else if (DYLIB_COMMANDS.has(cmd)) {
+      // The name is at an offset within the command.
       const nameOff = data.readUInt32LE(offset + 8);
       if (nameOff < cmdsize) libraries.add(cstr(data, offset + nameOff));
     }
@@ -233,7 +289,7 @@ function parseMachO(data: Buffer): BinaryInfo {
     arch,
     symbols: [...symbols].sort(),
     linkedLibraries: [...libraries].filter(Boolean).sort(),
-    truncated: false,
+    truncated: incomplete,
   };
 }
 
@@ -254,33 +310,86 @@ function parsePe(data: Buffer): BinaryInfo {
   // Data directory entry 1 is the import table.
   const dirOff = optOff + (pe32Plus ? 112 : 96);
   if (dirOff + 16 > data.byteLength) return { ...EMPTY, format: 'pe', arch, truncated: true };
+  // NumberOfRvaAndSizes says how many directories the file actually has, and a
+  // minimal or packed PE ships fewer than two. Reading entry 1 regardless lands
+  // in the section header table and fabricates libraries and symbol names out
+  // of it, at BINARY_SYMBOL's 0.85 confidence.
+  const numberOfDirectories = data.readUInt32LE(optOff + (pe32Plus ? 108 : 92));
+  const noImports: BinaryInfo = { format: 'pe', arch, symbols: [], linkedLibraries: [], truncated: false };
+  if (numberOfDirectories < 2 || dirOff + 16 > optOff + sizeOfOptional) return noImports;
   const importRva = data.readUInt32LE(dirOff + 8);
-  if (importRva === 0) return { format: 'pe', arch, symbols: [], linkedLibraries: [], truncated: false };
+  if (importRva === 0) return noImports;
 
   interface Sec {
     va: number;
     vsize: number;
     raw: number;
+    rawSize: number;
   }
   const sections: Sec[] = [];
   const secOff = optOff + sizeOfOptional;
+  let incomplete = false;
   for (let i = 0; i < numberOfSections; i++) {
     const s = secOff + i * 40;
-    if (s + 40 > data.byteLength) break;
-    sections.push({ va: data.readUInt32LE(s + 12), vsize: data.readUInt32LE(s + 8), raw: data.readUInt32LE(s + 20) });
-  }
-  const toFile = (rva: number): number => {
-    for (const s of sections) {
-      if (rva >= s.va && rva < s.va + Math.max(s.vsize, 1)) return s.raw + (rva - s.va);
+    if (s + 40 > data.byteLength) {
+      incomplete = true;
+      break;
     }
-    return -1;
+    sections.push({
+      va: data.readUInt32LE(s + 12),
+      vsize: data.readUInt32LE(s + 8),
+      raw: data.readUInt32LE(s + 20),
+      rawSize: data.readUInt32LE(s + 16),
+    });
+  }
+  // Sorted by VA so the containing section is a binary search. NumberOfSections
+  // is an attacker-controlled u16 and this runs once per import thunk; a linear
+  // scan turned a crafted 1 MB file into 47 seconds. Sections that overlap are
+  // not valid PE and are not resolved here.
+  const byVa = [...sections].sort((a, b) => a.va - b.va);
+  const toFile = (rva: number): number => {
+    let lo = 0;
+    let hi = byVa.length - 1;
+    let at = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if ((byVa[mid] as Sec).va <= rva) {
+        at = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (at < 0) return -1;
+    const s = byVa[at] as Sec;
+    const delta = rva - s.va;
+    // VirtualSize 0 means the loader maps SizeOfRawData instead; treating such
+    // a section as one byte wide lost every import in it.
+    if (delta >= (s.vsize > 0 ? s.vsize : s.rawSize)) return -1;
+    // Past SizeOfRawData the section is virtual-only - .bss, and the padded
+    // sections every packed binary declares. There are no file bytes there, and
+    // mapping it anyway reads the next section's contents and reports a symbol
+    // that is not in the import table at all.
+    if (delta >= s.rawSize) return -1;
+    return s.raw + delta;
   };
 
   const symbols = new Set<string>();
   const libraries = new Set<string>();
   let entry = toFile(importRva);
 
-  for (let i = 0; entry >= 0 && entry + 20 <= data.byteLength && i < 4096; i++, entry += 20) {
+  // Descriptor count, thunk count and section count are all header fields with
+  // no relation to how many bytes the file holds, so the 4096 x 100,000 caps
+  // alone bound nothing useful. One import entry occupies `step` bytes of file,
+  // which makes the file's own length the honest budget for the whole walk.
+  const step = pe32Plus ? 8 : 4;
+  let budget = Math.floor(data.byteLength / step);
+
+  for (let i = 0; entry >= 0 && i < 4096 && budget > 0; i++, entry += 20) {
+    if (entry + 20 > data.byteLength) {
+      incomplete = true;
+      break;
+    }
     const lookupRva = data.readUInt32LE(entry);
     const nameRva = data.readUInt32LE(entry + 12);
     const thunkRva = data.readUInt32LE(entry + 16);
@@ -290,8 +399,8 @@ function parsePe(data: Buffer): BinaryInfo {
     if (nameOff >= 0) libraries.add(cstr(data, nameOff).toLowerCase());
 
     let thunk = toFile(lookupRva !== 0 ? lookupRva : thunkRva);
-    const step = pe32Plus ? 8 : 4;
-    for (let j = 0; thunk >= 0 && thunk + step <= data.byteLength && j < 100_000; j++, thunk += step) {
+    for (let j = 0; thunk >= 0 && thunk + step <= data.byteLength && j < 100_000 && budget > 0; j++, thunk += step) {
+      budget--;
       const value = pe32Plus ? data.readBigUInt64LE(thunk) : BigInt(data.readUInt32LE(thunk));
       if (value === 0n) break;
       const ordinalFlag = pe32Plus ? 1n << 63n : 1n << 31n;
@@ -304,12 +413,16 @@ function parsePe(data: Buffer): BinaryInfo {
     }
   }
 
+  // Stopping on the budget rather than on the import table's own terminator
+  // means the walk is incomplete, whatever the reason.
+  if (budget <= 0) incomplete = true;
+
   return {
     format: 'pe',
     arch,
     symbols: [...symbols].sort(),
     linkedLibraries: [...libraries].filter(Boolean).sort(),
-    truncated: false,
+    truncated: incomplete,
   };
 }
 
@@ -318,6 +431,10 @@ function parsePe(data: Buffer): BinaryInfo {
 function cstr(data: Buffer, offset: number, max = 512): string {
   if (offset < 0 || offset >= data.byteLength) return '';
   const end = Math.min(offset + max, data.byteLength);
-  const nul = data.indexOf(0, offset);
-  return data.toString('utf8', offset, nul >= 0 && nul < end ? nul : end);
+  // The search must stop where the slice does. An unbounded indexOf memchrs to
+  // EOF, so a string offset pointing into a NUL-free region costs the rest of
+  // the file per symbol - quadratic against the 200,000-symbol caps above, and
+  // trivially arranged by the hostile input this parser exists to read.
+  const nul = data.subarray(offset, end).indexOf(0);
+  return data.toString('utf8', offset, nul >= 0 ? offset + nul : end);
 }

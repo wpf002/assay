@@ -31,6 +31,7 @@ export function Worklist({
   scanId,
   pack,
   moved,
+  secrecyYears,
   showSystem,
 }: {
   title: string;
@@ -39,6 +40,8 @@ export function Worklist({
   scanId: string;
   pack: string;
   moved: Map<string, { before: number; after: number }>;
+  /** X, as the rows were ranked. The derivation panel has to be asked for the same one. */
+  secrecyYears: number;
   /**
    * Estate-wide, the same asset legitimately appears once per system and the
    * rows are otherwise identical. Without the system name the list reads as
@@ -64,6 +67,7 @@ export function Worklist({
             scanId={scanId}
             pack={pack}
             moved={moved.get(f.occurrenceId)}
+            secrecyYears={secrecyYears}
             showSystem={showSystem}
             open={open === f.occurrenceId}
             onToggle={() => setOpen(open === f.occurrenceId ? null : f.occurrenceId)}
@@ -79,6 +83,7 @@ function Row({
   scanId,
   pack,
   moved,
+  secrecyYears,
   showSystem,
   open,
   onToggle,
@@ -87,6 +92,7 @@ function Row({
   scanId: string;
   pack: string;
   moved: { before: number; after: number } | undefined;
+  secrecyYears: number;
   showSystem: boolean;
   open: boolean;
   onToggle: () => void;
@@ -128,7 +134,15 @@ function Row({
           <Timeline f={f} />
         </div>
       </div>
-      {open && <Detail scanId={scanId} occId={f.occurrenceId} pack={pack} finding={f} />}
+      {open && (
+        <Detail
+          scanId={scanId}
+          occId={f.occurrenceId}
+          pack={pack}
+          secrecyYears={secrecyYears}
+          finding={f}
+        />
+      )}
     </>
   );
 }
@@ -138,23 +152,31 @@ function Detail({
   scanId,
   occId,
   pack,
+  secrecyYears,
   finding,
 }: {
   scanId: string;
   occId: string;
   pack: string;
+  secrecyYears: number;
   finding: RankedFinding;
 }) {
   const [data, setData] = useState<Derivation | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    // Both are reset on every run: an error left over from a failed fetch
+    // renders instead of the derivation that has since loaded, and the
+    // previous pack's reasoning under the new pack's name is a wrong answer
+    // stated with full confidence.
+    setError(null);
+    setData(null);
     try {
-      setData(await getDerivation(scanId, occId, pack));
+      setData(await getDerivation(scanId, occId, pack, secrecyYears));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [scanId, occId, pack]);
+  }, [scanId, occId, pack, secrecyYears]);
 
   useEffect(() => {
     void load();

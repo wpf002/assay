@@ -77,6 +77,28 @@ describe('what actually changed', () => {
     expect(d.entries[0]?.kind).toBe('REGRESSED');
   });
 
+  it('does not call the first run of the reachability pass a regression', () => {
+    // A scan that found no entry point analyzed nothing, so every occurrence in
+    // it is null. Reading null as "was not reachable" reports the whole estate
+    // as REGRESSED the day someone adds an entry point the analyzer recognises.
+    const d = diffScans(
+      snap('a', [occ(['SOURCE_AST'])]),
+      snap('b', [occ(['SOURCE_AST'], { reachability: reach(true) })]),
+    );
+    expect(d.counts.REGRESSED).toBe(0);
+    expect(d.entries[0]?.kind).toBe('RECLASSIFIED');
+    expect(d.entries[0]?.reason).toContain('analyzed for the first time');
+  });
+
+  it('reports a lost reachability verdict rather than swallowing it', () => {
+    const d = diffScans(
+      snap('a', [occ(['SOURCE_AST'], { reachability: reach(true) })]),
+      snap('b', [occ(['SOURCE_AST'])]),
+    );
+    expect(d.entries[0]?.kind).toBe('RECLASSIFIED');
+    expect(d.entries[0]?.reason).toContain('coverage question');
+  });
+
   it('reports becoming unreachable as an improvement', () => {
     const d = diffScans(
       snap('a', [occ(['SOURCE_AST'], { reachability: reach(true) })]),

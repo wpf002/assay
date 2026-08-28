@@ -116,6 +116,14 @@ export function Dashboard({
     if (scanId === '') return;
     let cancelled = false;
     setError(null);
+    // Everything below is derived from the controls that just moved. Holding
+    // the previous selection's rows on screen while the new ones load - and
+    // permanently if the fetch fails - is the one thing this page must not do,
+    // since a difference is only attributable to policy if the numbers under
+    // the labels were computed from them.
+    setWorklists(null);
+    setEstate(null);
+    setCoverage(null);
 
     if (scanId === ESTATE) {
       Promise.all([getEstate(pack, secrecyYears), getCoverage().catch(() => null)])
@@ -140,8 +148,6 @@ export function Dashboard({
       };
     }
 
-    setEstate(null);
-    setCoverage(null);
     getWorklists(scanId, pack, secrecyYears)
       .then((w) => {
         if (!cancelled) setWorklists(w);
@@ -160,7 +166,7 @@ export function Dashboard({
       return;
     }
     let cancelled = false;
-    getRerank(scanId, comparePack, pack)
+    getRerank(scanId, comparePack, pack, secrecyYears)
       .then((r) => {
         if (cancelled) return;
         setMoved(new Map(r.moved.map((m) => [m.occurrenceId, m.slackYears])));
@@ -169,7 +175,7 @@ export function Dashboard({
     return () => {
       cancelled = true;
     };
-  }, [scanId, pack, comparePack]);
+  }, [scanId, pack, comparePack, secrecyYears]);
 
   const activePack = useMemo(() => packs.find((p) => p.packId === pack) ?? null, [packs, pack]);
 
@@ -240,6 +246,8 @@ export function Dashboard({
 
       {error !== null && <p className="aside">could not reach the API: {error}</p>}
 
+      {worklists === null && error === null && <p className="aside">Loading…</p>}
+
       {worklists !== null && (
         <>
           <div className="headline">
@@ -248,12 +256,13 @@ export function Dashboard({
             </div>
             <div className="label">
               <strong>
-                of {worklists.headline.denominator} work items are already overdue.
+                of {worklists.headline.denominator} confirmed work items are already overdue.
               </strong>
               <br />
               Every item below is cryptography a quantum computer breaks, running in code you
               reach. Each one shows who has to change it and by when. Click any row for the
-              evidence behind it.
+              evidence behind it. Rows marked observed only are listed below but not counted
+              above — that evidence is not certain enough to commit to.
             </div>
           </div>
 
@@ -265,6 +274,7 @@ export function Dashboard({
               scanId={scanId}
               pack={pack}
               moved={moved}
+              secrecyYears={secrecyYears}
               showSystem={estate !== null}
             />
             <Worklist
@@ -274,6 +284,7 @@ export function Dashboard({
               scanId={scanId}
               pack={pack}
               moved={moved}
+              secrecyYears={secrecyYears}
               showSystem={estate !== null}
             />
           </div>
@@ -323,12 +334,22 @@ export function Dashboard({
             </p>
           )}
 
-          {activePack !== null && activePack.caveats.length > 0 && (
+          {activePack !== null && (
             <p className="caveat">
               <strong>Deadline source:</strong>{' '}
               {activePack.regulatoryAuthority ?? 'this pack sets no regulatory deadline.'}
             </p>
           )}
+
+          {/* Shipped figures are inputs, not truth claims. The reader of a
+              deadline the whole ranking turns on is the one who needs to know
+              what its publisher was unsure about. */}
+          {activePack !== null &&
+            activePack.caveats.map((c) => (
+              <p className="caveat" key={c}>
+                {c}
+              </p>
+            ))}
         </>
       )}
     </div>

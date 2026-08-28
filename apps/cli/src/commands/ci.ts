@@ -2,12 +2,15 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import {
   BaselineSchema,
+  MAX_SUPPRESSION_DAYS,
   evaluateGate,
   makeBaseline,
   rank,
   type Baseline,
   type Finding,
+  type GateOptions,
   type GateResult,
+  type Suppression,
   type Worklists,
 } from '@assay/core';
 import { analyzeReachability, assemble } from '@assay/correlate';
@@ -16,6 +19,7 @@ import { scanDependencies } from '@assay/detect-deps';
 import { scanCertificates } from '@assay/detect-pki';
 import { scanBinaries } from '@assay/detect-binary';
 import { decimalYear, loadPack } from '@assay/policy';
+import { nowOption } from '../options.js';
 
 /**
  * The build gate.
@@ -41,7 +45,7 @@ export async function runCi(path: string, options: CiOptions): Promise<void> {
   const root = resolve(path);
   const systemName = options.system ?? basename(root);
   const pack = loadPack(options.policy);
-  const now = options.now ? new Date(options.now) : new Date();
+  const now = nowOption(options.now);
   const collectedAt = now.toISOString();
 
   const [source, deps, pki, binary] = await Promise.all([
@@ -62,14 +66,14 @@ export async function runCi(path: string, options: CiOptions): Promise<void> {
   });
 
   const baselinePath = resolve(options.baseline);
-  const existing = await readBaseline(baselinePath);
+  const existing = await readBaseline(baselinePath, now);
   const gateOptions = {
     now,
     ...(options.includeLibrarySurface === true ? { includeLibrarySurface: true } : {}),
   };
 
   if (options.updateBaseline === true) {
-    const next = makeBaseline(
+    const next = rebaseline(
       worklists,
       { systemName, createdAt: collectedAt },
       gateOptions,
@@ -95,15 +99,53 @@ export async function runCi(path: string, options: CiOptions): Promise<void> {
   if (!result.passed) process.exitCode = 1;
 }
 
-async function readBaseline(path: string): Promise<Baseline | null> {
+/**
+ * The baseline that --update-baseline writes.
+ *
+ * Every finding a suppression can suppress is also one `makeBaseline` accepts,
+ * so writing both records the same occurrence twice: once as a decision that
+ * expires and once as one that never does. Once the window closes the gate
+ * skips it as accepted instead of reporting it, and the expiry can never fail
+ * a build - which is exactly the temporary exception quietly made permanent
+ * that the expiry exists to prevent.
+ */
+export function rebaseline(
+  worklists: Worklists,
+  meta: { systemName: string; createdAt: string },
+  opts: GateOptions,
+  carryOver: readonly Suppression[],
+): Baseline {
+  const next = makeBaseline(worklists, meta, opts, carryOver);
+  const suppressed = new Set(next.suppressions.map((s) => s.occurrenceId));
+  return { ...next, accepted: next.accepted.filter((id) => !suppressed.has(id)) };
+}
+
+async function readBaseline(path: string, now: Date): Promise<Baseline | null> {
+  let baseline: Baseline;
   try {
-    return BaselineSchema.parse(JSON.parse(await readFile(path, 'utf8')));
+    baseline = BaselineSchema.parse(JSON.parse(await readFile(path, 'utf8')));
   } catch (e) {
     if (e instanceof Error && 'code' in e && (e as { code?: string }).code === 'ENOENT') return null;
     // A malformed baseline must not silently degrade into "no baseline",
     // which would fail the build on the entire estate and look like an outage.
     throw new Error(`baseline at ${path} could not be read: ${e instanceof Error ? e.message : String(e)}`);
   }
+
+  for (const s of baseline.suppressions) {
+    // The schema takes any date, so a hand-written expiry decades out parses
+    // and suppresses forever. The bound the creation path applies has to hold
+    // for an edited file too, or the expiry is advisory. Suppressions already
+    // past their date pass through: reporting those is the gate's job.
+    const days = (Date.parse(s.expiresAt) - now.getTime()) / 86_400_000;
+    if (days > MAX_SUPPRESSION_DAYS) {
+      throw new Error(
+        `baseline at ${path}: the suppression for ${s.occurrenceId} runs until ` +
+          `${s.expiresAt.slice(0, 10)}, more than ${MAX_SUPPRESSION_DAYS} days out; anything ` +
+          'longer is a decision to never fix it, and should be recorded as one',
+      );
+    }
+  }
+  return baseline;
 }
 
 function report(

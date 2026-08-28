@@ -4,6 +4,7 @@ import {
   cipherFromName,
   hashFromName,
   normalizeCurve,
+  signatureFromName,
   sshAlgorithm,
   tlsCipherSuite,
 } from '@assay/core';
@@ -64,73 +65,115 @@ const det = (
 
 /* -------------------------------------------------------------------- nginx */
 
+/**
+ * An OpenSSL cipher list is not a list of suites.
+ *
+ * `!` and `-` REMOVE suites, `+` moves them to the end, `@STRENGTH` and
+ * `@SECLEVEL` are directives, and ALL/HIGH/DEFAULT/kEECDH name whole classes
+ * this parser has no expansion for. tlsCipherSuite reads any token without a
+ * recognized key-exchange prefix as static RSA key transport - the finding it
+ * calls the single worst case for harvest-now-decrypt-later - so passing the
+ * control words through manufactures that finding out of the most common
+ * cipher line in production, and reports `-RC4` as a deployed cipher.
+ *
+ * A real suite name is hyphenated (AES128-SHA, ECDHE-RSA-AES128-GCM-SHA256) or
+ * is a TLS 1.3 name; a bare word is a class keyword and is dropped.
+ */
+function cipherListSuites(value: string): string[] {
+  const out: string[] = [];
+  for (const raw of value.replace(/^["']|["']$/g, '').split(':')) {
+    const token = raw.trim();
+    if (token === '' || /^[!\-@]/.test(token)) continue;
+    const bare = token.replace(/^\+/, '');
+    if (!bare.includes('-') && !/^TLS_/i.test(bare)) continue;
+    out.push(bare);
+  }
+  return out;
+}
+
 function parseNginx(source: string): ConfigFinding[] {
   const out: ConfigFinding[] = [];
+  // nginx directives are terminated by `;`, not by newline, and wrapping a long
+  // ssl_ciphers list across lines is standard practice. Reading line by line
+  // kept only the first suite and left a dangling `:` whose empty token
+  // tlsCipherSuite resolved to a static-RSA asset the config did not contain.
+  let buffer = '';
+  let startLine = 0;
   source.split(/\r?\n/).forEach((line, i) => {
-    const trimmed = line.trim().replace(/;$/, '');
+    const trimmed = line.trim();
     if (trimmed === '' || trimmed.startsWith('#')) return;
-
-    const ciphers = /^ssl_ciphers\s+(.+)$/.exec(trimmed);
-    if (ciphers?.[1]) {
-      const suites = ciphers[1].replace(/^["']|["']$/g, '').split(':').filter((s) => !s.startsWith('!'));
-      const detections = suites.flatMap((s) =>
-        tlsCipherSuite(s).map((spec) => det('config/nginx/ssl_ciphers', spec, 'DATA_ENCRYPTION')),
-      );
-      if (detections.length > 0) {
-        out.push({ line: i + 1, raw: trimmed, directive: 'ssl_ciphers', detections });
-      }
-      return;
+    if (buffer === '') startLine = i + 1;
+    buffer = buffer === '' ? trimmed : `${buffer} ${trimmed}`;
+    // `{` and `}` open and close a block, so neither can continue a directive.
+    if (!/[;{}]$/.test(buffer)) return;
+    for (const statement of buffer.split(/[;{}]/)) {
+      const directive = statement.trim();
+      if (directive !== '') nginxDirective(directive, startLine, out);
     }
-
-    const curve = /^ssl_ecdh_curve\s+(.+)$/.exec(trimmed);
-    if (curve?.[1]) {
-      const detections = curve[1]
-        .split(':')
-        .map((c) => normalizeCurve(c))
-        .filter((c): c is string => c !== null)
-        .map((c) => {
-          // X25519 names its own curve. Emitting curve=X25519 alongside would
-          // give the same primitive two content hashes and two worklist rows.
-          const montgomery = c === 'X25519' || c === 'X448';
-          return det(
-            'config/nginx/ssl_ecdh_curve',
-            {
-              primitive: montgomery ? (c as 'X25519' | 'X448') : 'ECDH',
-              parameters: montgomery ? {} : { curve: c },
-              purpose: 'KEY_ESTABLISHMENT',
-            },
-            'KEY_ESTABLISHMENT',
-          );
-        });
-      if (detections.length > 0) {
-        out.push({ line: i + 1, raw: trimmed, directive: 'ssl_ecdh_curve', detections });
-      }
-      return;
-    }
-
-    // A protocol version is not itself an algorithm, but TLS 1.0/1.1 pin a
-    // fixed and broken suite set, so it is recorded as an integrity finding.
-    const protocols = /^ssl_protocols\s+(.+)$/.exec(trimmed);
-    if (protocols?.[1]) {
-      const legacy = protocols[1].split(/\s+/).filter((p) => /TLSv1(\.[01])?$/.test(p) || /SSLv/.test(p));
-      if (legacy.length > 0) {
-        out.push({
-          line: i + 1,
-          raw: trimmed,
-          directive: 'ssl_protocols',
-          detections: legacy.map((p) => ({
-            primitive: 'SHA1' as const,
-            parameters: { outputLength: 160 },
-            purpose: 'INTEGRITY' as const,
-            purposeSource: 'RESOLVED' as const,
-            ruleId: 'config/nginx/ssl_protocols',
-            note: `${p} mandates SHA-1 in its PRF and signature suites`,
-          })),
-        });
-      }
-    }
+    buffer = '';
   });
   return out;
+}
+
+function nginxDirective(trimmed: string, line: number, out: ConfigFinding[]): void {
+  const ciphers = /^ssl_ciphers\s+(.+)$/.exec(trimmed);
+  if (ciphers?.[1]) {
+    const detections = cipherListSuites(ciphers[1]).flatMap((s) =>
+      tlsCipherSuite(s).map((spec) => det('config/nginx/ssl_ciphers', spec, 'DATA_ENCRYPTION')),
+    );
+    if (detections.length > 0) {
+      out.push({ line, raw: trimmed, directive: 'ssl_ciphers', detections });
+    }
+    return;
+  }
+
+  const curve = /^ssl_ecdh_curve\s+(.+)$/.exec(trimmed);
+  if (curve?.[1]) {
+    const detections = curve[1]
+      .split(':')
+      .map((c) => normalizeCurve(c))
+      .filter((c): c is string => c !== null)
+      .map((c) => {
+        // X25519 names its own curve. Emitting curve=X25519 alongside would
+        // give the same primitive two content hashes and two worklist rows.
+        const montgomery = c === 'X25519' || c === 'X448';
+        return det(
+          'config/nginx/ssl_ecdh_curve',
+          {
+            primitive: montgomery ? (c as 'X25519' | 'X448') : 'ECDH',
+            parameters: montgomery ? {} : { curve: c },
+            purpose: 'KEY_ESTABLISHMENT',
+          },
+          'KEY_ESTABLISHMENT',
+        );
+      });
+    if (detections.length > 0) {
+      out.push({ line, raw: trimmed, directive: 'ssl_ecdh_curve', detections });
+    }
+    return;
+  }
+
+  // A protocol version is not itself an algorithm, but TLS 1.0/1.1 pin a
+  // fixed and broken suite set, so it is recorded as an integrity finding.
+  const protocols = /^ssl_protocols\s+(.+)$/.exec(trimmed);
+  if (protocols?.[1]) {
+    const legacy = protocols[1].split(/\s+/).filter((p) => /TLSv1(\.[01])?$/.test(p) || /SSLv/.test(p));
+    if (legacy.length > 0) {
+      out.push({
+        line,
+        raw: trimmed,
+        directive: 'ssl_protocols',
+        detections: legacy.map((p) => ({
+          primitive: 'SHA1' as const,
+          parameters: { outputLength: 160 },
+          purpose: 'INTEGRITY' as const,
+          purposeSource: 'RESOLVED' as const,
+          ruleId: 'config/nginx/ssl_protocols',
+          note: `${p} mandates SHA-1 in its PRF and signature suites`,
+        })),
+      });
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ openssl */
@@ -224,8 +267,14 @@ function parseJavaSecurity(source: string): ConfigFinding[] {
     const detections: Detection[] = [];
     for (const entry of entries) {
       const name = (entry.split(/\s+/)[0] ?? '').replace(/,$/, '');
-      const spec = hashFromName(name) ?? cipherFromName(name);
-      if (spec) {
+      const single = hashFromName(name) ?? cipherFromName(name);
+      // Most entries in both disabled lists are OID-style signature names -
+      // MD5withRSA, SHA1withRSA - which resolve to a digest plus a key
+      // algorithm rather than to one spec. Dropping them makes a JVM that
+      // disables MD5withRSA indistinguishable from one that still permits it,
+      // which is the distinction this parser exists to record.
+      const specs = single === null ? signatureFromName(name) : [single];
+      for (const spec of specs) {
         detections.push({
           primitive: spec.primitive,
           parameters: spec.parameters,
@@ -281,6 +330,12 @@ function parseSshd(source: string): ConfigFinding[] {
     if (purpose === undefined) return;
 
     // Leading +/-/^ modify the built-in default list rather than replacing it.
+    // `+`/`^` append or prepend, so the named algorithms really are offered and
+    // are recorded (the defaults they join are not visible here). `-` REMOVES
+    // them: reading `Ciphers -3des-cbc,arcfour` as a replacement list reports a
+    // hardened host as offering the two worst ciphers it just turned off.
+    const operator = /^[+\-^]/.exec(kv[2])?.[0];
+    if (operator === '-') return;
     const names = kv[2]
       .replace(/^[+\-^]/, '')
       .split(',')

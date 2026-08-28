@@ -13,6 +13,7 @@ import {
   VendorAttestationSchema,
 } from '@assay/attest';
 import { decimalYear, loadPack } from '@assay/policy';
+import { nowOption } from '../options.js';
 
 /** A blank questionnaire, so the vendor is asked for the right things. */
 export async function attestTemplate(options: {
@@ -77,7 +78,7 @@ export async function attestReconcile(
   const attestation = await loadAttestation(attestationPath);
   const root = resolve(path);
   const systemId = options.system ?? attestation.systemId ?? basename(root);
-  const now = options.now ? new Date(options.now) : new Date();
+  const now = nowOption(options.now);
   const collectedAt = now.toISOString();
   const pack = loadPack(options.policy);
 

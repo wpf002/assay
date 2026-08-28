@@ -19,6 +19,13 @@ import type { Modality } from '../types/modality.js';
  */
 export type AssertionLevel = 'CONFIRMED' | 'OBSERVED' | 'SUSPECTED';
 
+/** Strength order. Exported so every consumer ranks the three levels the same way. */
+export const ASSERTION_ORDER: Readonly<Record<AssertionLevel, number>> = {
+  SUSPECTED: 0,
+  OBSERVED: 1,
+  CONFIRMED: 2,
+};
+
 export const CONFIRM_THRESHOLD = 0.85;
 export const OBSERVE_THRESHOLD = 0.5;
 
@@ -222,9 +229,24 @@ function component(
   gs: readonly GatedOccurrence[],
   opts: CbomExportOptions,
 ): unknown {
-  const best = gs.reduce((a, b) => (b.confidence > a.confidence ? b : a));
+  // A component folds every occurrence of one asset, so its assertion level is a
+  // claim about all of them and has to be the weakest, never the argmax of
+  // confidence. Taking the strongest lets one untainted occurrence launder a
+  // tainted sibling into a CONFIRMED export - the exact laundering I6 forbids -
+  // and, on equal confidence, makes the exported level turn on occurrence-id
+  // ordering. `gs` arrives sorted by occurrence id, so ties resolve stably.
+  const weakest = gs.reduce((a, b) =>
+    ASSERTION_ORDER[b.assertionLevel] < ASSERTION_ORDER[a.assertionLevel] ? b : a,
+  );
+  // Confidence is existential: the strongest single occurrence's own belief that
+  // this asset is here. Re-pooling raw evidence across occurrences noisy-ORs a
+  // string match in one service against a vendor questionnaire about another and
+  // exports a number no occurrence in the estate holds.
+  const strongest = gs.reduce((a, b) => (b.confidence > a.confidence ? b : a));
   const allEvidence = gs.flatMap((g) => g.occurrence.evidence);
-  const breakdown = computeConfidenceBreakdown(allEvidence);
+  // Only the pooled number was unsound. The per-group tallies are a faithful
+  // census of which techniques identified this asset and what each one can bear.
+  const techniques = computeConfidenceBreakdown(allEvidence);
 
   const occurrences = allEvidence
     .filter((e) => e.occurrence !== undefined)
@@ -291,9 +313,9 @@ function component(
         // CycloneDX confidence is an integer 0-100 with no ceiling discipline.
         // The number is faithful; the derivation behind it has no home in the
         // schema and travels in assay: properties below.
-        confidence: Math.round(breakdown.value * 100),
+        confidence: Math.round(strongest.confidence * 100),
         concludedValue: asset ? assetName(asset) : assetId,
-        methods: breakdown.groups.map((g) => ({
+        methods: techniques.groups.map((g) => ({
           technique: TECHNIQUE_OF[g.contributing],
           confidence: Math.round(g.ceiling * 100),
           value: `${g.contributing}: ${g.tallies.reduce((n, t) => n + t.count, 0)} observation(s), ${
@@ -305,8 +327,8 @@ function component(
       callstack,
     }),
     properties: [
-      prop('assay:assertionLevel', best.assertionLevel),
-      prop('assay:confidence', String(breakdown.value)),
+      prop('assay:assertionLevel', weakest.assertionLevel),
+      prop('assay:confidence', String(strongest.confidence)),
       prop('assay:quantumVulnerable', String(asset?.quantumVulnerable ?? 'unknown')),
       prop('assay:purpose', asset?.purpose ?? 'unknown'),
       prop('assay:urgencyTrack', asset ? track(asset.purpose) : 'unknown'),
@@ -320,9 +342,22 @@ function component(
             ? 'unanalyzed'
             : 'false',
       ),
-      ...(best.downgradeReason ? [prop('assay:downgradeReason', best.downgradeReason)] : []),
+      ...(weakest.downgradeReason ? [prop('assay:downgradeReason', weakest.downgradeReason)] : []),
+      // Each occurrence's own tree, not a tree recomputed from pooled evidence:
+      // the recomputed one drops the ASSUMPTION nodes that produced the
+      // downgrade, so the one document that is supposed to show the working
+      // would not contain the word.
       ...(opts.includeFactorTrees
-        ? [prop('assay:factor', trace(breakdown.factor).join('\n'))]
+        ? [
+            prop(
+              'assay:factor',
+              gs
+                .map((g) =>
+                  [`occurrence ${g.occurrence.id}`, ...trace(g.occurrence.confidence)].join('\n'),
+                )
+                .join('\n'),
+            ),
+          ]
         : []),
     ],
   });

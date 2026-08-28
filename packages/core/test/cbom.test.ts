@@ -31,6 +31,37 @@ const occ = (id: string, evidence: Evidence[], extra: Partial<Occurrence> = {}):
 
 const ASSET = makeAsset('RSA', { modulusLength: 2048 }, 'KEY_ESTABLISHMENT');
 
+/** An occurrence whose confidence tree carries an operator assumption. */
+const taintedOcc = (id: string, evidence: Evidence[], extra: Partial<Occurrence> = {}): Occurrence =>
+  occ(id, evidence, {
+    confidence: {
+      kind: 'INFERENCE',
+      label: 'confidence',
+      value: computeConfidence(evidence).value,
+      weight: 1,
+      sources: [
+        {
+          kind: 'ASSUMPTION',
+          label: 'operator asserts this path never ships',
+          value: true,
+          weight: 1,
+          sources: [],
+        },
+      ],
+    },
+    ...extra,
+  });
+
+type Prop = { readonly name: string; readonly value: string };
+
+const component = (doc: { components: readonly unknown[] }): {
+  evidence: { identity: { confidence: number } };
+  properties: readonly Prop[];
+} => doc.components[0] as never;
+
+const propOf = (doc: { components: readonly unknown[] }, name: string): string | undefined =>
+  component(doc).properties.find((p) => p.name === name)?.value;
+
 const OPTS = {
   policyPackId: 'eo-14412',
   policyPackVersion: '1.0.0',
@@ -137,6 +168,23 @@ describe('CycloneDX export', () => {
     expect(s).toContain('src/api.ts');
   });
 
+  it('omits the callstack when reachability found no path to show', () => {
+    // A `callstack: { frames: [] }` reads as "we traced this" when we did not.
+    // Config and network evidence are reached with no call path to display.
+    const reached = [
+      occ('o1', [ev('SOURCE_CONFIG', 'nginx.conf:3')], {
+        reachability: {
+          reachable: true,
+          via: 'ENTRY_POINT',
+          entryPoint: 'http:POST /v1/payments',
+          path: [],
+          factor: { kind: 'INFERENCE', label: 'reached', value: true, weight: 1, sources: [] },
+        },
+      }),
+    ];
+    expect(JSON.stringify(toCycloneDX(reached, [ASSET], OPTS))).not.toContain('callstack');
+  });
+
   it('drops SUSPECTED findings unless asked for them', () => {
     const weak = [occ('w', [ev('ASSERTED', 'vendor-q:acme')])];
     expect(toCycloneDX(weak, [ASSET], OPTS).components).toHaveLength(0);
@@ -149,5 +197,82 @@ describe('CycloneDX export', () => {
     const dep = [occ('d', [ev('DEPENDENCY', 'package.json')])];
     const doc = toCycloneDX(dep, [ASSET], { ...OPTS, includeSuspected: true });
     expect(JSON.stringify(doc.dependencies)).not.toContain('"uses"');
+  });
+});
+
+describe('a component folds many occurrences of one asset', () => {
+  const clean = occ('aaa', [ev('SOURCE_AST', 'a.ts:12')], { systemId: 'svc-a' });
+  const dirty = taintedOcc('zzz', [ev('SOURCE_AST', 'sign.go:99')], {
+    systemId: 'svc-b',
+    controlClass: 'VENDOR_LOCKED',
+  });
+
+  it('asserts at the weakest level, so a clean sibling cannot launder a tainted one (I6)', () => {
+    const doc = toCycloneDX([clean, dirty], [ASSET], OPTS);
+    expect(doc.components).toHaveLength(1);
+    expect(propOf(doc, 'assay:occurrenceCount')).toBe('2');
+    expect(propOf(doc, 'assay:assertionLevel')).toBe('OBSERVED');
+    expect(propOf(doc, 'assay:downgradeReason')).toContain('operator asserts this path never ships');
+  });
+
+  it('asserts at the same level whichever occurrence id sorts first', () => {
+    // The winner used to be settled by a reduce over confidence, which keeps its
+    // left operand on a tie - so the exported level turned on a sha256 prefix.
+    const swapped = toCycloneDX(
+      [occ('zzz', [ev('SOURCE_AST', 'a.ts:12')], { systemId: 'svc-a' }),
+       taintedOcc('aaa', [ev('SOURCE_AST', 'sign.go:99')], { systemId: 'svc-b' })],
+      [ASSET],
+      OPTS,
+    );
+    expect(propOf(swapped, 'assay:assertionLevel')).toBe('OBSERVED');
+  });
+
+  it('never exports a confidence no occurrence in the estate holds', () => {
+    // A string match in one service and a vendor questionnaire about another are
+    // not two observations of the same thing, so they do not corroborate: pooling
+    // them noisy-OR'd 0.30 and 0.40 into 0.58.
+    const doc = toCycloneDX(
+      [
+        occ('binary', [ev('BINARY_STRING', 'lib.so:1')], { systemId: 'svc-a' }),
+        occ('vendor', [ev('ASSERTED', 'vendor-q:acme')], { systemId: 'svc-b' }),
+      ],
+      [ASSET],
+      { ...OPTS, includeSuspected: true },
+    );
+    expect(propOf(doc, 'assay:confidence')).toBe('0.4');
+    expect(component(doc).evidence.identity.confidence).toBe(40);
+  });
+
+  it('carries each occurrence its own factor tree, assumptions included', () => {
+    const doc = toCycloneDX([clean, dirty], [ASSET], { ...OPTS, includeFactorTrees: true });
+    const factor = propOf(doc, 'assay:factor') ?? '';
+    expect(factor).toContain('ASSUMPTION');
+    expect(factor).toContain('occurrence aaa');
+    expect(factor).toContain('occurrence zzz');
+  });
+
+  it('is byte-identical whichever order the occurrences arrive in', () => {
+    // Determinism is a product claim: the same estate produces the same CBOM on
+    // every run, and detectors do not emit in a fixed order. The component picks
+    // one occurrence's call path out of many, so the choice has to be sorted.
+    const reachable = (id: string, file: string): Occurrence =>
+      occ(id, [ev('SOURCE_AST', `${file}:12`)], {
+        systemId: `svc-${id}`,
+        reachability: {
+          reachable: true,
+          via: 'ENTRY_POINT',
+          entryPoint: `http:GET /${id}`,
+          path: [{ module: id, function: 'sign', fullFilename: file, line: 1 }],
+          factor: { kind: 'INFERENCE', label: 'reached', value: true, weight: 1, sources: [] },
+        },
+      });
+    const first = reachable('aaa', 'src/a.ts');
+    const second = reachable('zzz', 'src/z.ts');
+    expect(JSON.stringify(toCycloneDX([second, first], [ASSET], OPTS))).toBe(
+      JSON.stringify(toCycloneDX([first, second], [ASSET], OPTS)),
+    );
+    expect(JSON.stringify(toCycloneDX([dirty, clean], [ASSET], OPTS))).toBe(
+      JSON.stringify(toCycloneDX([clean, dirty], [ASSET], OPTS)),
+    );
   });
 });

@@ -14,6 +14,36 @@ export interface StringHit {
   readonly encoding: 'ascii' | 'utf16le';
 }
 
+/**
+ * Longest string this will build in one piece.
+ *
+ * A printable run can be as long as the file, and V8 refuses to construct a
+ * string over 0x1fffffe8 characters - so a 512 MB blob of 0x41, a size the
+ * default maxFileBytes admits, threw out of extractStrings and took the whole
+ * scan down with it, every later file included. A long run is emitted in
+ * chunks instead: nothing is dropped and no single string approaches the limit.
+ */
+const MAX_RUN_CHARS = 64 * 1024;
+
+function pushRun(
+  out: StringHit[],
+  data: Buffer,
+  start: number,
+  end: number,
+  encoding: 'ascii' | 'utf16le',
+  limit: number,
+): void {
+  const chunk = MAX_RUN_CHARS * (encoding === 'utf16le' ? 2 : 1);
+  for (let at = start; at < end && out.length < limit; at += chunk) {
+    const stop = Math.min(at + chunk, end);
+    out.push({
+      value: data.toString(encoding === 'utf16le' ? 'utf16le' : 'latin1', at, stop),
+      offset: at,
+      encoding,
+    });
+  }
+}
+
 export function extractStrings(data: Buffer, minLength = 6, limit = 20_000): StringHit[] {
   const out: StringHit[] = [];
 
@@ -26,7 +56,7 @@ export function extractStrings(data: Buffer, minLength = 6, limit = 20_000): Str
       continue;
     }
     if (start >= 0 && i - start >= minLength) {
-      out.push({ value: data.toString('latin1', start, i), offset: start, encoding: 'ascii' });
+      pushRun(out, data, start, i, 'ascii', limit);
     }
     start = -1;
   }
@@ -42,11 +72,7 @@ export function extractStrings(data: Buffer, minLength = 6, limit = 20_000): Str
       continue;
     }
     if (wstart >= 0 && (i - wstart) / 2 >= minLength) {
-      out.push({
-        value: data.toString('utf16le', wstart, i),
-        offset: wstart,
-        encoding: 'utf16le',
-      });
+      pushRun(out, data, wstart, i, 'utf16le', limit);
     }
     wstart = -1;
   }

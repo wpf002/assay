@@ -46,10 +46,21 @@ export function boundTo(call: CallSite, ctx: FileContext, modules: readonly stri
   const mod = ctx.aliases.get(root);
   if (mod !== undefined) {
     for (const m of modules) {
-      if (mod === m || mod.startsWith(`${m}.`) || m.startsWith(`${mod}.`)) return true;
+      if (mod === m || isSubmodule(mod, m) || isSubmodule(m, mod)) return true;
     }
   }
   return false;
+}
+
+/**
+ * Every language separates module path segments differently: `crypto.subtle`,
+ * `crypto/rsa`, `rsa::RsaPrivateKey`, `crypto-js/aes`. Comparing on `.` alone
+ * made the Go and Rust gates inert - `crypto/rsa` never matched `crypto`, so
+ * every detection there came from the hardcoded package-name fallback and an
+ * aliased `import cryptorsa "crypto/rsa"` produced nothing at all.
+ */
+function isSubmodule(path: string, prefix: string): boolean {
+  return path.startsWith(prefix) && /^[./:]/.test(path.slice(prefix.length));
 }
 
 export function detection(

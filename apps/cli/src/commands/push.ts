@@ -7,6 +7,7 @@ import { importInventory, kmsFindings } from '@assay/detect-kms';
 import { scanBinaries } from '@assay/detect-binary';
 import { loadPack } from '@assay/policy';
 import { loadTraces } from './traces.js';
+import { nowOption } from '../options.js';
 import type { Finding } from '@assay/core';
 
 /**
@@ -33,7 +34,7 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
   const root = resolve(path);
   const systemName = options.system ?? basename(root);
   const pack = loadPack(options.policy);
-  const now = options.now ? new Date(options.now) : new Date();
+  const now = nowOption(options.now);
   const collectedAt = now.toISOString();
 
   const [source, deps, pki, binary] = await Promise.all([

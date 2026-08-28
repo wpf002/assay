@@ -273,7 +273,15 @@ const webcrypto: Rule = {
     const modulusLength = num(prop(first, 'modulusLength'));
     const namedCurveRaw = str(prop(first, 'namedCurve'));
     const namedCurve = namedCurveRaw === null ? null : normalizeCurve(namedCurveRaw);
-    const length = num(prop(first, 'length'));
+    // `length` is the AES key size only on AesKeyGenParams, which is what
+    // generateKey and importKey take. On AesCtrParams it is the width of the
+    // counter block (1..128) and AesGcmParams has no `length` at all, so
+    // reading it everywhere reported `encrypt({name:'AES-CTR', length:64})` as
+    // a 64-bit key and gave it a different asset id from the AES-256 key it
+    // was actually using.
+    const length = call.method === 'generateKey' || call.method === 'importKey'
+      ? num(prop(first, 'length'))
+      : null;
     const hashRaw = str(prop(first, 'hash')) ?? str(prop(prop(first, 'hash'), 'name'));
     const hash = hashRaw === null ? null : hashFromName(hashRaw);
     const out: Detection[] = [];
@@ -348,13 +356,17 @@ const webcrypto: Rule = {
 const jwt: Rule = {
   id: 'ts/jsonwebtoken/sign',
   languages: ['typescript', 'tsx', 'javascript'],
-  methods: ['sign', 'verify', 'SignJWT', 'jwtVerify'],
+  // jose's signing API is constructor-based and puts the alg on
+  // setProtectedHeader rather than on the constructor or on sign().
+  methods: ['sign', 'verify', 'SignJWT', 'jwtVerify', 'setProtectedHeader'],
   requiresImport: ['jsonwebtoken', 'jose'],
   rationale:
     "A JWT's `alg` is its entire security story and resolves to a signature primitive plus a digest.",
   detect(call, ctx) {
     if (!boundTo(call, ctx, ['jsonwebtoken', 'jose'])) return [];
-    const opts = arg(call, 2) ?? arg(call, 1);
+    // jsonwebtoken and jose's function-style verify take the options last;
+    // setProtectedHeader takes the JOSE header as its only argument.
+    const opts = call.method === 'setProtectedHeader' ? arg(call, 0) : (arg(call, 2) ?? arg(call, 1));
     const alg = str(prop(opts, 'algorithm')) ?? str(prop(opts, 'alg'));
     const list = prop(opts, 'algorithms');
     const names: string[] = [];
@@ -399,7 +411,10 @@ const forge: Rule = {
 const cryptoJs: Rule = {
   id: 'ts/crypto-js',
   languages: ['typescript', 'tsx', 'javascript'],
-  methods: ['encrypt', 'decrypt', 'MD5', 'SHA1', 'SHA256', 'SHA512', 'SHA3', 'HmacSHA1', 'HmacSHA256'],
+  // The digest variants are dispatched by method name, so every one the
+  // library ships has to be listed: `HmacSHA512` never reaches a rule at all
+  // if only HmacSHA1 and HmacSHA256 are here.
+  methods: ['encrypt', 'decrypt', 'MD5', 'SHA1', 'SHA224', 'SHA256', 'SHA384', 'SHA512', 'SHA3', 'HmacMD5', 'HmacSHA1', 'HmacSHA224', 'HmacSHA256', 'HmacSHA384', 'HmacSHA512', 'HmacSHA3'],
   requiresImport: ['crypto-js'],
   rationale:
     'crypto-js puts the algorithm in the member path (CryptoJS.AES.encrypt, CryptoJS.MD5) rather than in an argument.',
@@ -407,12 +422,30 @@ const cryptoJs: Rule = {
     if (!boundTo(call, ctx, ['crypto-js'])) return [];
     const path = call.callee.toLowerCase();
     const id = cryptoJs.id;
-    if (path.includes('tripledes') || path.includes('des3')) {
+    // Matched on segment boundaries: `crypto-js/aes` is imported as a bare
+    // `AES`, whose callee is `aes.encrypt` with no leading dot, and a substring
+    // test for `des` would swallow `tripledes`.
+    const algorithm = (name: string): boolean => new RegExp(`(^|\\.)${name}(\\.|$)`).test(path);
+    if (algorithm('tripledes') || algorithm('des3')) {
       return [detection(id, '3DES', {}, 'DATA_ENCRYPTION')];
     }
-    if (path.includes('rc4')) return [detection(id, 'RC4', {}, 'DATA_ENCRYPTION')];
-    if (path.includes('rabbit')) return [];
-    if (path.includes('.aes.')) {
+    if (algorithm('des')) {
+      // No DES member in the Primitive union; naming it is honest where
+      // borrowing 3DES would assert twice its real strength.
+      return [
+        detection(
+          id,
+          'UNKNOWN',
+          { name: 'DES', keySize: 56 },
+          'DATA_ENCRYPTION',
+          'RESOLVED',
+          'single DES: 56-bit, broken without reference to quantum',
+        ),
+      ];
+    }
+    if (algorithm('rc4')) return [detection(id, 'RC4', {}, 'DATA_ENCRYPTION')];
+    if (algorithm('rabbit') || algorithm('rabbitlegacy')) return [];
+    if (algorithm('aes')) {
       return [detection(id, 'AES', { mode: 'CBC' }, 'DATA_ENCRYPTION', 'RULE_DEFAULT', 'crypto-js defaults to CBC with PKCS7 when no mode is given')];
     }
     const spec = hashFromName(call.method.replace(/^Hmac/, ''));

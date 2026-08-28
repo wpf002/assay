@@ -52,7 +52,11 @@ afterAll(async () => {
 
 describe('ingest', () => {
   it('accepts a scan and gives it a deterministic id', async () => {
-    expect(scanA).toBe('sample-20260801000000');
+    // Readable, and unique: the stamp says which scan a human is looking at,
+    // the digest keeps two scans of one system in the same second apart.
+    expect(scanA).toMatch(/^sample-20260801000000-[0-9a-f]{8}$/);
+    const again = await app.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T1) });
+    expect(again.json<{ id: string }>().id).toBe(scanA);
     expect(scanA).not.toBe(scanB);
   });
 

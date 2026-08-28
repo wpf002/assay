@@ -6,6 +6,7 @@ import {
   type ScanSummary,
   type StoredScan,
   type StoredTraceBundle,
+  type TraceBundleSummary,
 } from './types.js';
 
 /**
@@ -28,7 +29,15 @@ export class PrismaScanStore implements ScanStore {
   constructor(private readonly prisma: PrismaClient) {}
 
   static fromUrl(url: string): PrismaScanStore {
-    return new PrismaScanStore(new PrismaClient({ datasources: { db: { url } } }));
+    return new PrismaScanStore(
+      new PrismaClient({
+        datasources: { db: { url } },
+        // An ingest writes one row per occurrence and one per evidence item
+        // inside a single transaction. Prisma's five-second default aborts a
+        // realistically sized scan halfway and reports it as a server error.
+        transactionOptions: { maxWait: 10_000, timeout: 120_000 },
+      }),
+    );
   }
 
   async put(scan: StoredScan): Promise<void> {
@@ -69,6 +78,14 @@ export class PrismaScanStore implements ScanStore {
         },
       });
 
+      // The assets the scan DECLARED, which is not the same set as the assets
+      // its occurrences reference: an inventory entry with no work item behind
+      // it has no occurrence to be recovered from.
+      await tx.scanAsset.createMany({
+        data: scan.assets.map((a) => ({ scanId: scan.id, assetId: a.id })),
+        skipDuplicates: true,
+      });
+
       for (const o of scan.occurrences) {
         const g = gate(o);
         await tx.occurrence.create({
@@ -77,6 +94,11 @@ export class PrismaScanStore implements ScanStore {
             id: `${scan.id}:${o.id}`,
             assetId: o.assetId,
             systemId: system.id,
+            // The occurrence's own logical system. It is part of the content
+            // hash that makes the id stable, and trace correlation matches
+            // trace service names against it, so it cannot be reconstructed
+            // from the scan's system name.
+            systemKey: o.systemId,
             controlClass: o.controlClass,
             reachable: o.reachability?.reachable ?? null,
             reachVia: o.reachability?.via ?? null,
@@ -109,15 +131,15 @@ export class PrismaScanStore implements ScanStore {
     });
   }
 
-  async list(systemName?: string): Promise<ScanSummary[]> {
+  async list(systemName: string | undefined, limit: number): Promise<ScanSummary[]> {
     const rows = await this.prisma.scan.findMany({
       where: systemName === undefined ? {} : { systemName },
       orderBy: { startedAt: 'desc' },
-      include: {
-        _count: { select: { occurrences: true } },
-        // Distinct assets per scan, without loading every occurrence.
-        occurrences: { select: { assetId: true }, distinct: ['assetId'] },
-      },
+      take: limit,
+      // Counted in the database. Selecting an assetId per occurrence of every
+      // scan ever recorded, to arrive at two numbers, is the same query at
+      // estate scale as loading the estate.
+      include: { _count: { select: { occurrences: true, assets: true } } },
     });
     return rows.map((r) => ({
       id: r.id,
@@ -126,16 +148,13 @@ export class PrismaScanStore implements ScanStore {
       policyPackId: r.policyPackId,
       policyPackVersion: r.policyPackVersion,
       occurrenceCount: r._count.occurrences,
-      assetCount: r.occurrences.length,
+      assetCount: r._count.assets,
       detectors: r.detectors,
     }));
   }
 
   async get(id: string): Promise<StoredScan | null> {
-    const row = await this.prisma.scan.findUnique({
-      where: { id },
-      include: { occurrences: { include: { evidence: true, asset: true } } },
-    });
+    const row = await this.prisma.scan.findUnique({ where: { id }, include: FULL_SCAN });
     return row === null ? null : hydrate(row);
   }
 
@@ -144,7 +163,7 @@ export class PrismaScanStore implements ScanStore {
       where: { systemName },
       orderBy: { startedAt: 'desc' },
       take: limit,
-      include: { occurrences: { include: { evidence: true, asset: true } } },
+      include: FULL_SCAN,
     });
     return rows.map(hydrate);
   }
@@ -155,8 +174,25 @@ export class PrismaScanStore implements ScanStore {
       orderBy: [{ systemName: 'asc' }, { startedAt: 'desc' }],
       select: { id: true },
     });
-    const scans = await Promise.all(newest.map((r) => this.get(r.id)));
-    return scans.filter((s): s is StoredScan => s !== null);
+    if (newest.length === 0) return [];
+    // One query for the whole estate rather than one per system: fanning the
+    // hydration out with Promise.all saturates the connection pool long before
+    // it runs out of memory, and every estate route goes through here.
+    const rows = await this.prisma.scan.findMany({
+      where: { id: { in: newest.map((r) => r.id) } },
+      orderBy: { systemName: 'asc' },
+      include: FULL_SCAN,
+    });
+    return rows.map(hydrate);
+  }
+
+  async latestSystemNames(): Promise<string[]> {
+    const rows = await this.prisma.scan.findMany({
+      distinct: ['systemName'],
+      orderBy: { systemName: 'asc' },
+      select: { systemName: true },
+    });
+    return rows.map((r) => r.systemName);
   }
 
   async putTraces(bundle: StoredTraceBundle): Promise<void> {
@@ -185,8 +221,11 @@ export class PrismaScanStore implements ScanStore {
     });
   }
 
-  async listTraces(): Promise<Omit<StoredTraceBundle, 'edges'>[]> {
-    const rows = await this.prisma.traceBundle.findMany({ orderBy: { ingestedAt: 'desc' } });
+  async listTraces(): Promise<TraceBundleSummary[]> {
+    const rows = await this.prisma.traceBundle.findMany({
+      orderBy: { ingestedAt: 'desc' },
+      include: { _count: { select: { edges: true } } },
+    });
     return rows.map((r) => ({
       id: r.id,
       source: r.source,
@@ -195,6 +234,7 @@ export class PrismaScanStore implements ScanStore {
       ingestedAt: r.ingestedAt.toISOString(),
       spanCount: r.spanCount,
       rootServices: r.rootServices,
+      edgeCount: r._count.edges,
     }));
   }
 
@@ -216,11 +256,33 @@ export class PrismaScanStore implements ScanStore {
   }
 }
 
+/**
+ * Everything a StoredScan is made of. The declared assets are joined
+ * separately from the occurrences because the two sets are not the same.
+ */
+const FULL_SCAN = {
+  occurrences: { include: { evidence: true, asset: true } },
+  assets: { include: { asset: true } },
+} as const;
+
+type AssetRow = {
+  id: string;
+  primitive: string;
+  parameters: unknown;
+  purpose: string;
+  quantumVulnerable: boolean;
+  classicalSecurityBits: number | null;
+  nistQuantumSecurityLevel: number | null;
+  oid: string | null;
+};
+
 type ScanRow = Awaited<ReturnType<PrismaClient['scan']['findUnique']>> & {
+  assets: { asset: AssetRow }[];
   occurrences: {
     id: string;
     assetId: string;
     systemId: string;
+    systemKey: string;
     controlClass: string;
     reachable: boolean | null;
     reachVia: string | null;
@@ -228,16 +290,7 @@ type ScanRow = Awaited<ReturnType<PrismaClient['scan']['findUnique']>> & {
     reachPath: unknown;
     reachFactor: unknown;
     confidenceFactor: unknown;
-    asset: {
-      id: string;
-      primitive: string;
-      parameters: unknown;
-      purpose: string;
-      quantumVulnerable: boolean;
-      classicalSecurityBits: number | null;
-      nistQuantumSecurityLevel: number | null;
-      oid: string | null;
-    };
+    asset: AssetRow;
     evidence: {
       modality: string;
       locator: string;
@@ -252,27 +305,35 @@ type ScanRow = Awaited<ReturnType<PrismaClient['scan']['findUnique']>> & {
   }[];
 };
 
+function asset(a: AssetRow): CryptoAsset {
+  return {
+    id: a.id,
+    primitive: a.primitive as CryptoAsset['primitive'],
+    parameters: a.parameters as CryptoAsset['parameters'],
+    purpose: a.purpose as CryptoAsset['purpose'],
+    quantumVulnerable: a.quantumVulnerable,
+    classicalSecurityBits: a.classicalSecurityBits,
+    nistQuantumSecurityLevel: a.nistQuantumSecurityLevel,
+    oid: a.oid,
+  };
+}
+
 function hydrate(row: NonNullable<ScanRow>): StoredScan {
   const assets = new Map<string, CryptoAsset>();
   const occurrences: Occurrence[] = [];
 
+  // The declared set first. Scans written before ScanAsset existed have only
+  // the assets their occurrences reference, which the loop below still adds.
+  for (const link of row.assets) assets.set(link.asset.id, asset(link.asset));
+
   for (const o of row.occurrences) {
-    assets.set(o.asset.id, {
-      id: o.asset.id,
-      primitive: o.asset.primitive as CryptoAsset['primitive'],
-      parameters: o.asset.parameters as CryptoAsset['parameters'],
-      purpose: o.asset.purpose as CryptoAsset['purpose'],
-      quantumVulnerable: o.asset.quantumVulnerable,
-      classicalSecurityBits: o.asset.classicalSecurityBits,
-      nistQuantumSecurityLevel: o.asset.nistQuantumSecurityLevel,
-      oid: o.asset.oid,
-    });
+    assets.set(o.asset.id, asset(o.asset));
 
     occurrences.push({
       // Strip the scan prefix: the caller works with stable work-item ids.
       id: o.id.includes(':') ? (o.id.split(':').slice(1).join(':') as string) : o.id,
       assetId: o.assetId,
-      systemId: row.systemName,
+      systemId: o.systemKey,
       controlClass: o.controlClass as Occurrence['controlClass'],
       reachability:
         o.reachable === null

@@ -51,7 +51,13 @@ export interface Worklists {
    * never pad the headline count.
    */
   readonly unreached: readonly RankedFinding[];
-  /** Reachability not yet analyzed. Distinct from "analyzed and not reached". */
+  /**
+   * Findings held out of the worklists for want of a reachability verdict.
+   * Always empty: "we have not looked" is not "we looked and it is dead code",
+   * so a finding with no verdict is worked rather than withheld. The list stays
+   * in the shape because callers render it, like `unreached`, as work that is
+   * deliberately not shown.
+   */
   readonly unanalyzed: readonly RankedFinding[];
   /**
    * SUSPECTED findings - overwhelmingly dependency evidence at its 0.35 ceiling.
@@ -168,10 +174,14 @@ export function rank(
   const unreached = actionable.filter((f) => f.reachable === false).sort(bySlack);
   const unanalyzed = actionable.filter((f) => f.reachable === null).sort(bySlack);
 
-  // Reachability analysis is Phase 3. Until it runs, unanalyzed findings are
-  // the working set - they are not silently treated as unreached, because
-  // "we have not looked" and "we looked and it is dead code" are different claims.
-  const working = reached.length > 0 || unreached.length > 0 ? reached : unanalyzed;
+  // Reachability is analyzed per occurrence, and partial coverage is the normal
+  // state rather than a phase the product grows out of: certificates, managed
+  // keys and manifest entries have no call site to trace even after the pass
+  // runs. So the guard is per finding. Reading "some other occurrence came back
+  // unreached" as "the pass is complete" drops every finding we have not looked
+  // at, which is exactly the silent "we have not looked" -> "it is dead code"
+  // conversion this split exists to prevent.
+  const working = [...reached, ...unanalyzed].sort(bySlack);
 
   return {
     policyPackId: opts.policy.packId,
@@ -180,7 +190,9 @@ export function rank(
     confidentiality: working.filter((f) => f.track === 'CONFIDENTIALITY'),
     authenticity: working.filter((f) => f.track === 'AUTHENTICITY'),
     unreached,
-    unanalyzed: working === unanalyzed ? [] : unanalyzed,
+    // The distinction survives per finding, as reachable: null and reachedVia
+    // 'UNANALYZED'; it is the bucket that is empty, not the information.
+    unanalyzed: [],
     hints,
     headline: headline(working, opts),
   };

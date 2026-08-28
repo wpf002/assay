@@ -39,6 +39,8 @@ function readTlv(data: Buffer, offset: number): TLV | null {
   const first = data[offset + 1] as number;
 
   if (first < 0x80) {
+    // A short-form structure that runs past the file is a coincidence too.
+    if (offset + 2 + first > data.byteLength) return null;
     return { tag, headerLength: 2, length: first, end: offset + 2 + first };
   }
   // Indefinite length is not valid DER.
@@ -115,8 +117,16 @@ function classify(data: Buffer, outer: TLV, offset: number): DerKind {
   if (first.tag === 0x02 && first.length <= 2) {
     const second = readTlv(data, first.end);
     if (second === null || second.end > outer.end) return 'unknown';
-    // PKCS#8 PrivateKeyInfo, or a bare RSAPrivateKey with a large modulus.
-    if (second.tag === 0x30 || (second.tag === 0x02 && second.length >= 64)) return 'private-key';
+    // PKCS#8 PrivateKeyInfo. The trailing OCTET STRING is what makes it one:
+    // SEQUENCE{INTEGER, SEQUENCE} on its own is also a v1 TBSCertificate and a
+    // CertificationRequestInfo, and "private key in shipped firmware" is far
+    // too expensive an alarm to raise on a shape that broad.
+    if (second.tag === 0x30) {
+      const third = readTlv(data, second.end);
+      return third !== null && third.tag === 0x04 && third.end <= outer.end ? 'private-key' : 'unknown';
+    }
+    // A bare RSAPrivateKey: version, then a modulus too large to be anything else.
+    if (second.tag === 0x02 && second.length >= 64) return 'private-key';
   }
   return 'unknown';
 }
@@ -133,11 +143,12 @@ export function findDerStructures(data: Buffer, opts: DerScanOptions = {}): DerC
 
   for (let i = 0; i + 4 < data.byteLength && out.length < maxCandidates; i++) {
     if (data[i] !== 0x30) continue;
-    const next = data[i + 1] as number;
-    // Only long-form lengths: a short-form SEQUENCE is under 128 bytes and far
-    // too common in arbitrary machine code to be worth examining.
-    if (next < 0x81 || next > 0x84) continue;
-
+    // Short-form lengths are scanned too. Skipping them excluded every embedded
+    // EC public key - a P-256 SubjectPublicKeyInfo is 91 bytes, a P-384 one 120
+    // - which is the pinned trust anchor this scanner most wants to find.
+    // minLength and classify() carry the noise rejection on their own: over the
+    // 120 MB node binary the gate changed neither the candidate count nor the
+    // findings, and cost 9 ms.
     const tlv = readTlv(data, i);
     if (tlv === null || tlv.length < minLength) continue;
     const kind = classify(data, tlv, i);

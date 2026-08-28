@@ -57,6 +57,64 @@ server {
   });
 });
 
+describe('an OpenSSL cipher list is not a list of suites', () => {
+  const suites = (line: string): string[] =>
+    parseConfig('nginx', line)
+      .flatMap((f) => f.detections)
+      .map((d) => `${d.primitive}/${d.purpose}`);
+
+  it('does not read a cipher class keyword as a static-RSA suite', () => {
+    // `ssl_ciphers HIGH:!aNULL:!MD5;` is one of the most common lines in
+    // production and contains no suite this parser can expand.
+    expect(suites('ssl_ciphers HIGH:!aNULL:!MD5;')).toEqual([]);
+    expect(suites('ssl_ciphers DEFAULT;')).toEqual([]);
+  });
+
+  it('does not report a removed cipher as deployed', () => {
+    expect(suites('ssl_ciphers ALL:-RC4:!aNULL;')).toEqual([]);
+  });
+
+  it('ignores a sort directive', () => {
+    const withStrength = suites('ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:!aNULL:@STRENGTH;');
+    expect(withStrength).toEqual(suites('ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256;'));
+  });
+
+  it('still reads the suites around the keywords', () => {
+    expect(suites('ssl_ciphers HIGH:ECDHE-RSA-AES128-GCM-SHA256:!aNULL;')).toContain(
+      'ECDH/KEY_ESTABLISHMENT',
+    );
+  });
+});
+
+describe('an nginx directive ends at the semicolon, not at the newline', () => {
+  const findings = parseConfig(
+    'nginx',
+    `
+server {
+  ssl_ciphers ECDHE-ECDSA-AES256-GCM-SHA384:
+              ECDHE-RSA-CHACHA20-POLY1305:
+              DHE-RSA-AES128-GCM-SHA256;
+}
+`,
+  );
+  const all = findings.flatMap((f) => f.detections);
+
+  it('keeps every suite in a wrapped cipher list', () => {
+    const prims = all.map((d) => d.primitive);
+    expect(prims).toContain('ChaCha20');
+    expect(prims).toContain('DH');
+    expect(prims).toContain('ECDSA');
+  });
+
+  it('does not mint static RSA key transport out of the trailing separator', () => {
+    expect(all.some((d) => d.parameters['mode'] === 'KEY_TRANSPORT')).toBe(false);
+  });
+
+  it('reports the line the directive starts on', () => {
+    expect(findings[0]?.line).toBe(3);
+  });
+});
+
 describe('sshd_config', () => {
   const findings = parseConfig(
     'sshd',
@@ -94,6 +152,30 @@ MACs hmac-sha2-256,hmac-sha1
   });
 });
 
+describe('sshd list operators change the default list rather than replacing it', () => {
+  const prims = (line: string): string[] =>
+    parseConfig('sshd', line)
+      .flatMap((f) => f.detections)
+      .map((d) => d.primitive);
+
+  it('does not report an algorithm the config removes', () => {
+    // `Ciphers -3des-cbc,arcfour` is a hardening directive; reading it as a
+    // replacement list reports the two worst ciphers on a host that just
+    // turned them off.
+    expect(prims('Ciphers -3des-cbc,arcfour\n')).toEqual([]);
+    expect(prims('KexAlgorithms -diffie-hellman-group1-sha1\n')).toEqual([]);
+  });
+
+  it('records algorithms appended to the defaults', () => {
+    expect(prims('Ciphers +aes128-cbc\n')).toContain('AES');
+    expect(prims('KexAlgorithms ^curve25519-sha256\n')).toContain('X25519');
+  });
+
+  it('leaves a plain replacement list alone', () => {
+    expect(prims('Ciphers aes256-gcm@openssh.com,3des-cbc\n')).toContain('3DES');
+  });
+});
+
 describe('openssl.cnf', () => {
   const findings = parseConfig('openssl', 'default_md = sha1\ndefault_bits = 1024\ndefault_days = 365\n');
   it('reads the default digest and key size', () => {
@@ -115,5 +197,18 @@ describe('java.security', () => {
     const prims = findings.flatMap((f) => f.detections).map((d) => d.primitive);
     expect(prims).toContain('RC4');
     expect(findings[0]?.detections[0]?.note).toContain('disabled by JVM policy');
+  });
+
+  it('records the signature algorithms, which are most of what the lists name', () => {
+    // A dropped MD5withRSA is indistinguishable in the inventory from a JVM
+    // that still permits it, which is the distinction this parser exists for.
+    const findings = parseConfig(
+      'java-security',
+      'jdk.certpath.disabledAlgorithms=MD5, SHA1 jdkCA & usage TLSServer, RSA keySize < 1024, MD5withRSA, SHA1withRSA\n',
+    );
+    const detections = findings.flatMap((f) => f.detections);
+    expect(detections.some((d) => d.primitive === 'RSA' && d.note?.includes('MD5withRSA'))).toBe(true);
+    expect(detections.some((d) => d.primitive === 'RSA' && d.note?.includes('SHA1withRSA'))).toBe(true);
+    expect(detections.some((d) => d.primitive === 'RSA' && d.note?.includes('RSA keySize'))).toBe(true);
   });
 });

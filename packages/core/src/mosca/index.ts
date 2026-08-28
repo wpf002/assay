@@ -117,11 +117,16 @@ export function scoreMosca(input: MoscaInput): MoscaResult {
   const override = input.migrationYearsOverride;
   const y = override?.years ?? policy.migrationYearsByControl[controlClass];
 
-  const zCrqc = round2(policy.crqcYear - currentYear);
+  // round2 is presentation only. The lateness test reads the raw arithmetic:
+  // rounding Z first reports late=false for a finding up to ~1.8 days past the
+  // horizon, and it makes this branch disagree with the regulatory one below,
+  // which has always tested the raw value.
+  const zCrqc = policy.crqcYear - currentYear;
+  const crqcSlack = zCrqc - (x + y);
   const crqc: ConstraintResult = {
-    horizonYears: zCrqc,
-    slackYears: round2(zCrqc - (x + y)),
-    late: zCrqc - (x + y) < 0,
+    horizonYears: round2(zCrqc),
+    slackYears: round2(crqcSlack),
+    late: crqcSlack < 0,
   };
 
   const deadlineYear = policy.regulatoryDeadlines[track];
@@ -135,8 +140,14 @@ export function scoreMosca(input: MoscaInput): MoscaResult {
           late: deadlineYear - currentYear - y < 0,
         };
 
+  // Least slack binds, compared raw for the same reason. Two slacks that print
+  // alike are not equal, and on the rounded figures the <= tie-break can hand
+  // binding status to the constraint with the larger true slack - so the result
+  // reports `late` off a constraint that is not violated while the other one is.
   const bindingConstraint: MoscaResult['bindingConstraint'] =
-    regulatory !== null && regulatory.slackYears <= crqc.slackYears ? 'REGULATORY' : 'CRQC';
+    regulatory !== null && regulatory.deadlineYear - currentYear - y <= crqcSlack
+      ? 'REGULATORY'
+      : 'CRQC';
   const binding = bindingConstraint === 'REGULATORY' ? (regulatory as ConstraintResult) : crqc;
 
   const xFactor: Factor = input.secrecyLifetimeAssumed
@@ -185,7 +196,7 @@ export function scoreMosca(input: MoscaInput): MoscaResult {
       leaf(
         horizonKind,
         `Z CRQC year ${policy.crqcYear} @ ${policy.packId}@${policy.packVersion}${trustSuffix}`,
-        zCrqc,
+        crqc.horizonYears,
       ),
     ],
   };

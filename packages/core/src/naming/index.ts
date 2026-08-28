@@ -43,7 +43,10 @@ const HASHES: Readonly<Record<string, AlgoSpec>> = {
 
 /** Accepts node ('sha256'), WebCrypto ('SHA-256') and python ('SHA256') spellings. */
 export function hashFromName(name: string): AlgoSpec | null {
-  const k = name.trim().toLowerCase().replace(/^-+|-+$/g, '');
+  // RFC 6668 spells the SSH SHA-2 MACs `hmac-sha2-256`, where the `2` is the
+  // family and not part of the output length. Without folding it away, every
+  // modern `MACs` line resolves to null and its HMACs lose their digest.
+  const k = name.trim().toLowerCase().replace(/^-+|-+$/g, '').replace(/^sha2-(?=\d)/, 'sha');
   const direct = HASHES[k];
   if (direct) return direct;
   const dashless = k.replace(/-/g, '');
@@ -54,18 +57,44 @@ export function hashFromName(name: string): AlgoSpec | null {
 }
 
 /**
+ * Block ciphers with no member in the Primitive union.
+ *
+ * Mapping them onto a neighbouring primitive is worse than admitting the gap:
+ * single DES reported as 3DES asserts 112-bit strength for a 56-bit cipher, and
+ * RC2 has no relationship to 3DES at all. They are carried the way BLAKE2 is
+ * above - the real name in `name`, so the asset stays distinguishable and no
+ * false strength claim reaches the CBOM.
+ */
+const UNNAMED_CIPHERS: Readonly<Record<string, Readonly<Record<string, string | number>>>> = {
+  des: { name: 'DES', keySize: 56 },
+  rc2: { name: 'RC2' },
+  blowfish: { name: 'Blowfish' },
+  cast5: { name: 'CAST5' },
+  idea: { name: 'IDEA' },
+};
+
+/**
  * OpenSSL-style cipher spec: aes-256-gcm, aes128-cbc, des-ede3-cbc, rc4.
  * The mode matters as much as the key size - AES-128-ECB is a finding in a way
  * AES-256-GCM is not - so it is preserved as a parameter.
  */
 export function cipherFromName(name: string): AlgoSpec | null {
   const n = name.trim().toLowerCase();
-  // OpenSSL spells 3DES four different ways depending on where it appears:
+  // OpenSSL spells 3DES five different ways depending on where it appears:
   // `DES-EDE3-CBC` in a cipher spec, `DES-CBC3-SHA` in a TLS suite name,
-  // `3des-cbc` on the SSH wire, `DESede` in Java. Missing one of them means a
-  // 3DES endpoint silently reports as having no bulk cipher at all.
-  if (/^(des-ede3|des-cbc3|3des|desede|des3)/.test(n)) {
+  // `3des-cbc` on the SSH wire, `DESede` in Java, `TripleDES` in pyca. Missing
+  // one of them means a 3DES endpoint silently reports as having no bulk
+  // cipher at all.
+  if (/^(des-ede|des-cbc3|3des|desede|des3|tripledes)/.test(n)) {
     return { primitive: '3DES', parameters: { ...modeOf(n) }, purpose: 'DATA_ENCRYPTION' };
+  }
+  const unnamed = /^(des|rc2|blowfish|cast5|idea)(?:[-_]|$)/.exec(n);
+  if (unnamed?.[1]) {
+    return {
+      primitive: 'UNKNOWN',
+      parameters: { ...UNNAMED_CIPHERS[unnamed[1]], ...modeOf(n) },
+      purpose: 'DATA_ENCRYPTION',
+    };
   }
   if (/^(rc4|arcfour|arc4)/.test(n)) {
     return { primitive: 'RC4', parameters: {}, purpose: 'DATA_ENCRYPTION' };
@@ -130,6 +159,19 @@ export function joseAlgorithm(alg: string): readonly AlgoSpec[] {
       ...(hash ? [hash] : []),
     ];
   }
+  // Before the RS/PS signature branch: `RSA-OAEP`, `RSA-OAEP-256` and `RSA1_5`
+  // all start with `RS`, so testing that prefix first filed every JWE key
+  // management algorithm on the authenticity track with PKCS1v15 padding -
+  // losing the harvest-now-decrypt-later term for a key transport algorithm.
+  if (a.startsWith('RSA-OAEP') || a === 'RSA1_5') {
+    return [
+      {
+        primitive: 'RSA',
+        parameters: { alg: a, padding: a === 'RSA1_5' ? 'PKCS1v15' : 'OAEP' },
+        purpose: 'KEY_ESTABLISHMENT',
+      },
+    ];
+  }
   if (a.startsWith('RS') || a.startsWith('PS')) {
     return [
       {
@@ -149,15 +191,6 @@ export function joseAlgorithm(alg: string): readonly AlgoSpec[] {
   }
   if (a === 'EDDSA') {
     return [{ primitive: 'EdDSA', parameters: { alg: a }, purpose: 'DIGITAL_SIGNATURE' }];
-  }
-  if (a.startsWith('RSA-OAEP') || a === 'RSA1_5') {
-    return [
-      {
-        primitive: 'RSA',
-        parameters: { alg: a, padding: a === 'RSA1_5' ? 'PKCS1v15' : 'OAEP' },
-        purpose: 'KEY_ESTABLISHMENT',
-      },
-    ];
   }
   if (a.startsWith('ECDH-ES')) {
     return [{ primitive: 'ECDH', parameters: { alg: a }, purpose: 'KEY_ESTABLISHMENT' }];
@@ -240,8 +273,21 @@ export function sshAlgorithm(name: string): AlgoSpec | null {
       purpose: 'KEY_ESTABLISHMENT',
     };
   }
-  if (n.startsWith('sntrup') || n.startsWith('mlkem') || n.includes('ml-kem')) {
-    return { primitive: 'ML-KEM', parameters: { name: n }, purpose: 'KEY_ESTABLISHMENT' };
+  if (n.startsWith('mlkem') || n.includes('ml-kem')) {
+    // The wire name is provenance. In parameters it splits one key agreement
+    // into a row per spelling - OpenSSH ships both `...-sha256` and
+    // `...-sha256@openssh.com` - and stops the SSH and TLS modalities from
+    // agreeing on a content hash for the same KEM.
+    return { primitive: 'ML-KEM', parameters: {}, purpose: 'KEY_ESTABLISHMENT' };
+  }
+  if (n.startsWith('sntrup')) {
+    // Streamlined NTRU Prime is not FIPS 203. Calling it ML-KEM stamps the NIST
+    // ML-KEM OID on an asset that is not it, and lets a vendor roadmap claiming
+    // ML-KEM be corroborated by an endpoint that never negotiates it - the one
+    // contradiction attest exists to catch. It is still not Shor-broken, so the
+    // quantum verdict is unchanged; only the standardized label is withheld.
+    const kem = /^sntrup\d+(?:x25519)?/.exec(n)?.[0] ?? 'sntrup';
+    return { primitive: 'UNKNOWN', parameters: { name: kem }, purpose: 'KEY_ESTABLISHMENT' };
   }
   if (n.startsWith('ssh-rsa') || n.startsWith('rsa-sha2')) {
     return { primitive: 'RSA', parameters: {}, purpose: 'DIGITAL_SIGNATURE' };
