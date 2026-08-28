@@ -1,3 +1,12 @@
+> **These figures are stale and must be re-measured.** Everything below was
+> measured at commit `c7d189a`. Commit `bcf792e` then fixed 82 defects, several
+> of them in the exact rules and in the `CONFIRMED`-set logic these numbers are
+> computed over — including one that inflated the confirmed set by laundering a
+> tainted occurrence. Re-running the scans after the fixes gives django 2
+> confirmed, Ghost 2, n8n **10** (was 11). The precision samples have **not**
+> been re-verified by hand and should be treated as unmeasured until they are.
+> See [ROADMAP-2.md §10](ROADMAP-2.md).
+
 # Phase 1 exit gate
 
 The roadmap makes Phase 1 a kill gate: if precision at `CONFIRMED` cannot clear 90% after two rounds of rule tuning, the AST approach is under-specified and the project stops. This records the run.
