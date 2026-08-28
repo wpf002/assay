@@ -15,6 +15,7 @@ import { scanSource } from '@assay/detect-source';
 import { scanDependencies } from '@assay/detect-deps';
 import { scanCertificates } from '@assay/detect-pki';
 import { importInventory, kmsFindings } from '@assay/detect-kms';
+import { scanBinaries } from '@assay/detect-binary';
 import { decimalYear, loadPack } from '@assay/policy';
 
 export interface ScanOptions {
@@ -29,6 +30,8 @@ export interface ScanOptions {
   readonly now?: string;
   /** Normalized key-store inventory exported by the customer. See @assay/detect-kms. */
   readonly keyInventory?: string;
+  /** Binary analysis is on by default; vendor blobs are where the surprises live. */
+  readonly binaries?: boolean;
 }
 
 export async function runScan(path: string, options: ScanOptions): Promise<void> {
@@ -38,13 +41,21 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
   const now = options.now ? new Date(options.now) : new Date();
   const collectedAt = now.toISOString();
 
-  const [source, deps, pki] = await Promise.all([
+  const [source, deps, pki, binary] = await Promise.all([
     scanSource({ root, systemId, collectedAt }),
     scanDependencies({ root, systemId, collectedAt, includeDev: options.includeDev === true }),
     scanCertificates({ root, systemId, collectedAt }),
+    options.binaries === false
+      ? Promise.resolve({ findings: [], reports: [], filesScanned: 0 })
+      : scanBinaries({ root, systemId, collectedAt }),
   ]);
 
-  const findings: Finding[] = [...source.findings, ...deps.findings, ...pki.findings];
+  const findings: Finding[] = [
+    ...source.findings,
+    ...deps.findings,
+    ...pki.findings,
+    ...binary.findings,
+  ];
   let kmsKeys = 0;
   if (options.keyInventory !== undefined) {
     const inventory = await importInventory(options.keyInventory);
@@ -92,6 +103,7 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
     filesScanned: source.filesScanned,
     manifests: deps.manifests.length,
     certificates: pki.certificates.length,
+    binaries: binary.filesScanned,
     kmsKeys,
     uncatalogued: deps.uncatalogued,
     occurrences,
@@ -110,6 +122,7 @@ interface ReportInput {
   readonly filesScanned: number;
   readonly manifests: number;
   readonly certificates: number;
+  readonly binaries: number;
   readonly kmsKeys: number;
   readonly uncatalogued: readonly string[];
   readonly occurrences: readonly Occurrence[];
@@ -131,6 +144,7 @@ function report(r: ReportInput): void {
   line(
     `  ${r.filesScanned} file(s), ${r.manifests} manifest(s), ` +
       `${r.certificates} certificate(s)` +
+      (r.binaries > 0 ? `, ${r.binaries} binar${r.binaries === 1 ? 'y' : 'ies'}` : '') +
       (r.kmsKeys > 0 ? `, ${r.kmsKeys} managed key(s)` : '') +
       ` -> ${r.assets.length} asset(s), ${r.occurrences.length} occurrence(s)`,
   );

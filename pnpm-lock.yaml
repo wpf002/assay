@@ -69,6 +69,9 @@ importers:
       '@assay/correlate':
         specifier: workspace:*
         version: link:../../packages/correlate
+      '@assay/detect-binary':
+        specifier: workspace:*
+        version: link:../../packages/detect-binary
       '@assay/detect-deps':
         specifier: workspace:*
         version: link:../../packages/detect-deps
@@ -136,6 +139,22 @@ importers:
       '@assay/policy':
         specifier: workspace:*
         version: link:../policy
+
+  packages/detect-binary:
+    dependencies:
+      '@assay/core':
+        specifier: workspace:*
+        version: link:../core
+      fast-glob:
+        specifier: ^3.3.2
+        version: 3.3.3
+    devDependencies:
+      '@assay/correlate':
+        specifier: workspace:*
+        version: link:../correlate
+      '@peculiar/x509':
+        specifier: ^1.12.1
+        version: 1.14.3
 
   packages/detect-deps:
     dependencies:

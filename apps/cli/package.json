@@ -22,6 +22,7 @@
     "@assay/scope": "workspace:*",
     "@assay/detect-network": "workspace:*",
     "@assay/detect-pki": "workspace:*",
-    "@assay/detect-kms": "workspace:*"
+    "@assay/detect-kms": "workspace:*",
+    "@assay/detect-binary": "workspace:*"
   }
 }

@@ -4,6 +4,7 @@ import { scanSource } from '@assay/detect-source';
 import { scanDependencies } from '@assay/detect-deps';
 import { scanCertificates } from '@assay/detect-pki';
 import { importInventory, kmsFindings } from '@assay/detect-kms';
+import { scanBinaries } from '@assay/detect-binary';
 import { loadPack } from '@assay/policy';
 import type { Finding } from '@assay/core';
 
@@ -20,6 +21,8 @@ export interface PushOptions {
   readonly system?: string;
   readonly includeDev?: boolean;
   readonly keyInventory?: string;
+  /** Binary analysis is on by default; vendor blobs are where the surprises live. */
+  readonly binaries?: boolean;
   readonly now?: string;
 }
 
@@ -30,13 +33,21 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
   const now = options.now ? new Date(options.now) : new Date();
   const collectedAt = now.toISOString();
 
-  const [source, deps, pki] = await Promise.all([
+  const [source, deps, pki, binary] = await Promise.all([
     scanSource({ root, systemId: systemName, collectedAt }),
     scanDependencies({ root, systemId: systemName, collectedAt, includeDev: options.includeDev === true }),
     scanCertificates({ root, systemId: systemName, collectedAt }),
+    options.binaries === false
+      ? Promise.resolve({ findings: [], reports: [], filesScanned: 0 })
+      : scanBinaries({ root, systemId: systemName, collectedAt }),
   ]);
 
-  const findings: Finding[] = [...source.findings, ...deps.findings, ...pki.findings];
+  const findings: Finding[] = [
+    ...source.findings,
+    ...deps.findings,
+    ...pki.findings,
+    ...binary.findings,
+  ];
   if (options.keyInventory !== undefined) {
     const inventory = await importInventory(options.keyInventory);
     findings.push(...kmsFindings(inventory, { systemId: systemName, collectedAt }).findings);
@@ -47,7 +58,13 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
 
   const body = {
     systemName,
-    detectors: ['detect-source', 'detect-deps', 'detect-pki', ...(options.keyInventory ? ['detect-kms'] : [])],
+    detectors: [
+      'detect-source',
+      'detect-deps',
+      'detect-pki',
+      ...(binary.filesScanned > 0 ? ['detect-binary'] : []),
+      ...(options.keyInventory ? ['detect-kms'] : []),
+    ],
     policyPackId: pack.packId,
     policyPackVersion: pack.packVersion,
     scopeGrantId: null,

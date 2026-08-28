@@ -21,6 +21,7 @@ program
   .option('--include-dev', 'include devDependencies - off by default, dev tooling is not the estate')
   .option('--include-suspected', 'export SUSPECTED findings as well')
   .option('--key-inventory <file>', 'normalized cloud KMS / HSM key export to fold in')
+  .option('--no-binaries', 'skip binary analysis (ELF/Mach-O/PE symbols, constants, embedded DER)')
   .option('--json', 'emit machine-readable worklists on stdout')
   .option('--now <iso>', 'override the current time, for reproducible runs')
   .action(async (path: string, options) => {
@@ -53,6 +54,7 @@ program
   .option('--system <id>', 'system identifier (defaults to the directory name)')
   .option('--include-dev', 'include devDependencies')
   .option('--key-inventory <file>', 'normalized cloud KMS / HSM key export to fold in')
+  .option('--no-binaries', 'skip binary analysis')
   .option('--now <iso>', 'override the current time, for reproducible runs')
   .action(async (path: string, options) => {
     await runPush(path, options);

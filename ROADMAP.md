@@ -125,7 +125,7 @@ Assay records that a key exists, its algorithm, and its size. It never reads, st
 | 2 | Scope gate, KMS, PKI, network | done — adds the independent modalities I1 needs |
 | 3 | Correlation + reachability | done — where it becomes worth money |
 | 4 | API, persistence, web | done — makes the derivation clickable |
-| 5 | Binary analysis | last on purpose |
+| 5 | Binary analysis | done — last on purpose |
 | 6 | Language expansion + CI | breadth after depth |
 | 7 | Vendor attestation | now a FAR compliance artifact, not an upsell |
 
@@ -250,6 +250,8 @@ Where the product becomes worth money.
 
 ## 9. Phase 5 — Binary analysis
 
+**Status: complete. Exit gate passed** — `BINARY_STRING` cannot reach `CONFIRMED` without independent corroboration, verified at 1, 10, 500 and 5,000 repetitions and with every other binary modality piled on.
+
 Deliberately last. Highest effort, lowest confidence, and shipping it early buries the good signal under noise.
 
 **Deliverables**
@@ -260,7 +262,16 @@ Deliberately last. Highest effort, lowest confidence, and shipping it early buri
 - Embedded key and certificate detection via DER structure parsing, not string matching
 - Static library version fingerprinting
 
-**Exit gate:** on a corpus of binaries with known crypto composition, `BINARY_STRING` findings never reach `CONFIRMED` without independent corroboration. Verify the ceiling holds under adversarial input.
+**Exit gate: passed**, and it needed no special case. A 0.30 ceiling cannot reach 0.85 by noisy-OR within its own group however many matches there are, and `BINARY_SYMBOL` and `BINARY_CONSTANT` are in that *same* correlated group — three views of one artefact, not three independent facts. Adding a genuinely independent modality (a negotiated handshake) does confirm it. The invariant is arithmetic, not a check someone can forget.
+
+**Verified against a real 114 MB runtime**, which produced 18 work items: 3DES, RC4 and X25519 on the confidentiality track, ECDSA P-256/P-384, Ed25519, SHA-1 and an embedded RSA certificate on the authenticity track — all `VENDOR_LOCKED`, which is a four-year Y and puts them near the top of the list where they belong.
+
+**Two defects the first real run exposed:**
+
+1. **SHA-2 constants were invisible.** A `uint32` round-constant table compiles to the *target's* byte order, and every signature was written big-endian from the specification. Both orders are now generated automatically for word-table constants. A big-endian-only scanner finds SHA-2 in essentially nothing that ships.
+2. **The file-size cap skipped the files worth scanning.** 64 MB excluded the Node binary itself at 114 MB, and firmware images are routinely larger. Now 512 MB.
+
+**On I9 in this phase specifically:** embedded private keys are found by DER structure parsing, and the parser returns `bytes: null` for them by construction. A test asserts that a distinctive 16-byte window of a real PKCS#8 key appears nowhere in the emitted report, in hex or in base64.
 
 ---
 

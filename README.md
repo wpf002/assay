@@ -115,6 +115,7 @@ packages/
   detect-network/  TLS/SSH capability enumeration. scope-gated at the type level.
   detect-pki/      X.509 inventory, lifetime vs migration window
   detect-kms/      cloud KMS / HSM key inventory. metadata only, never key material.
+  detect-binary/   ELF/Mach-O/PE symbols, byte-exact constants, embedded DER.
   correlate/       joins modalities into Asset -> Occurrence edges, resolves conflicts
 apps/
   api/             Fastify + Prisma + Postgres. Ranks on read; never re-derives confidence.
@@ -191,10 +192,12 @@ Discovery is table stakes and several of these do it competently. The gap Assay 
 
 ## Status
 
-Phases 0 through 4 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
+Phases 0 through 5 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
 
 Phase 1's exit gate was a kill condition, and it passed: two disjoint hand-verified samples across django, Ghost and n8n scored 96.7% and 100% precision at `CONFIRMED`, and 834k LOC of n8n reduced to eleven work items. Details, including what the run does *not* establish, are in [VALIDATION.md](VALIDATION.md). Phase 2 added the scope gate, certificate inventory with a lifetime-vs-deadline check, TLS/SSH capability enumeration, and cloud key-store classification. Its exit gate — that an out-of-scope probe fails at the type level rather than at runtime — is asserted by a compile-time test that runs under `tsc` in CI.
 
 Phase 4 added the API, Postgres persistence, scan diff, ticket export, and the web surface: two worklists that are never merged, one derived headline, and a policy pack switcher that re-ranks live and badges every row that moved. Its exit gate — any slack figure to raw evidence in under three clicks — lands in one.
 
-Next is Phase 5, binary analysis — see [ROADMAP.md](ROADMAP.md).
+Phase 5 added binary analysis: imported symbol tables, byte-exact algorithm constants in both byte orders, embedded certificates and keys found by DER parsing rather than string matching, and library version fingerprints. Its exit gate — that a string match can never confirm on its own — holds by arithmetic rather than by a special case.
+
+Next is Phase 6, language expansion and CI integration — see [ROADMAP.md](ROADMAP.md).
