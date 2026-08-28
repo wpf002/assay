@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getDerivation, type Derivation, type RankedFinding } from '@/lib/api';
+import {
+  ASSERTION,
+  PURPOSE,
+  WHERE,
+  action,
+  actionDetail,
+  assetLabel,
+  driver,
+  due,
+} from '@/lib/format';
 import { Timeline } from './Timeline';
 import { Tree } from './Tree';
 
@@ -38,7 +48,8 @@ export function Worklist({
   return (
     <div className="track">
       <h2>
-        {title} <small>{subtitle}</small>
+        {title} <span className="count">{findings.length}</span>
+        <small>{subtitle}</small>
       </h2>
       {findings.length === 0 ? (
         <div className="empty">Nothing on this track.</div>
@@ -80,51 +91,57 @@ function Row({
   return (
     <>
       <div className="row" role="button" aria-expanded={open} onClick={onToggle}>
-        <div className={`slack ${f.late ? 'late' : ''}`}>
-          {f.slackYears >= 0 ? '+' : ''}
-          {f.slackYears.toFixed(1)}y
-        </div>
+        <div className={`slack ${f.late ? 'late' : ''}`}>{f.late ? 'Overdue' : ''}</div>
+
         <div>
-          <div className="name">{f.assetName}</div>
+          <div className="name">
+            {assetLabel(f)}
+            <span className="dim"> · {PURPOSE[f.purpose] ?? f.purpose}</span>
+          </div>
+
           <div className="meta">
-            {showSystem && <span className="chip">{f.systemId}</span>}
-            <span className={`chip ${f.assertionLevel.toLowerCase()}`}>{f.assertionLevel}</span>
-            <span className="chip">{f.controlClass}</span>
-            <span className="chip">{f.purpose}</span>
-            <span className="chip">{f.bindingConstraint === 'REGULATORY' ? 'deadline' : 'crqc'}</span>
-            {f.reachedVia !== 'UNANALYZED' && <span className="chip">{via(f.reachedVia)}</span>}
+            {showSystem && <strong>{f.systemId}</strong>}
+            {showSystem && ' · '}
+            <span className="act">{action(f)}</span>
+            {WHERE[f.reachedVia] !== undefined && WHERE[f.reachedVia] !== '' && (
+              <> · {WHERE[f.reachedVia]}</>
+            )}
+            {f.assertionLevel !== 'CONFIRMED' && (
+              <> · {ASSERTION[f.assertionLevel] ?? f.assertionLevel} only</>
+            )}
             {moved !== undefined && (
               <span className="moved">
-                {moved.before.toFixed(1)} → {moved.after.toFixed(1)} under this pack
+                {' '}
+                · was {moved.before.toFixed(1)}y under the other pack
               </span>
             )}
           </div>
+
         </div>
-        <Timeline f={f} />
+
+        <div className="whenwrap">
+          <div className={`when ${f.late ? 'late' : ''}`}>{due(f)}</div>
+          <div className="driver">{driver(f)}</div>
+          <Timeline f={f} />
+        </div>
       </div>
-      {open && <Detail scanId={scanId} occId={f.occurrenceId} pack={pack} />}
+      {open && <Detail scanId={scanId} occId={f.occurrenceId} pack={pack} finding={f} />}
     </>
   );
 }
 
-function via(v: string): string {
-  switch (v) {
-    case 'OBSERVED':
-      return 'seen on the wire';
-    case 'ENTRY_POINT':
-      return 'reached from an entry point';
-    case 'DEPLOYED_CONFIG':
-      return 'deployed config';
-    case 'LIBRARY_SURFACE':
-      return 'published surface';
-    case 'TRACE':
-      return 'traced from another service';
-    default:
-      return v.toLowerCase();
-  }
-}
 
-function Detail({ scanId, occId, pack }: { scanId: string; occId: string; pack: string }) {
+function Detail({
+  scanId,
+  occId,
+  pack,
+  finding,
+}: {
+  scanId: string;
+  occId: string;
+  pack: string;
+  finding: RankedFinding;
+}) {
   const [data, setData] = useState<Derivation | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -146,6 +163,13 @@ function Detail({ scanId, occId, pack }: { scanId: string; occId: string; pack: 
   const d = data.derivations;
   return (
     <div className="panel">
+      {actionDetail(finding) !== '' && (
+        <section>
+          <h3>What to do</h3>
+          <p className="prose">{actionDetail(finding)}</p>
+        </section>
+      )}
+
       {d.mosca !== null && (
         <section>
           <h3>Why this number</h3>

@@ -110,7 +110,6 @@ export function Dashboard({
   }, [scanId, pack, comparePack]);
 
   const activePack = useMemo(() => packs.find((p) => p.packId === pack) ?? null, [packs, pack]);
-  const scan = scans.find((s) => s.id === scanId) ?? null;
 
   if (scans.length === 0) {
     return (
@@ -130,15 +129,10 @@ export function Dashboard({
     <div className="wrap">
       <header className="top">
         <h1>assay</h1>
-        <span className="sub">
-          {estate === null
-            ? `${scan?.systemName} · ${scan?.occurrenceCount} work items · ${scan?.assetCount} assets`
-            : `${estate.systems} system(s)${estate.traceWindow === null ? ', no traces ingested' : `, traces ${estate.traceWindow}`}`}
-        </span>
 
         <div className="controls">
-          <select value={scanId} onChange={(e) => setScanId(e.target.value)} aria-label="scan">
-            <option value={ESTATE}>estate · every system, correlated by traces</option>
+          <select value={scanId} onChange={(e) => setScanId(e.target.value)} aria-label="Scan">
+            <option value={ESTATE}>Estate — every system, correlated by traces</option>
             {scans.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.systemName} · {s.startedAt.slice(0, 10)}
@@ -146,7 +140,7 @@ export function Dashboard({
             ))}
           </select>
 
-          <select value={pack} onChange={(e) => setPack(e.target.value)} aria-label="policy pack">
+          <select value={pack} onChange={(e) => setPack(e.target.value)} aria-label="Policy pack">
             {packs.map((p) => (
               <option key={p.packId} value={p.packId}>
                 {p.title}
@@ -158,20 +152,20 @@ export function Dashboard({
           <select
             value={comparePack}
             onChange={(e) => setComparePack(e.target.value)}
-            aria-label="compare against"
+            aria-label="Compare against"
           >
-            <option value="">compare against…</option>
+            <option value="">Compare against…</option>
             {packs
               .filter((p) => p.packId !== pack)
               .map((p) => (
                 <option key={p.packId} value={p.packId}>
-                  vs {p.packId}
+                  vs {p.title}
                 </option>
               ))}
           </select>
 
           <label className="sub">
-            secrecy{' '}
+            Secrecy{' '}
             <input
               type="number"
               min={0}
@@ -191,18 +185,23 @@ export function Dashboard({
         <>
           <div className="headline">
             <div className={`big ${worklists.headline.numerator > 0 ? 'late' : ''}`}>
-              {Math.round(worklists.headline.value * 100)}%
+              {worklists.headline.numerator}
             </div>
             <div className="label">
-              {worklists.headline.numerator} of {worklists.headline.denominator} {worklists.headline.label}
-              . Ranked under {worklists.policyPackId}@{worklists.policyPackVersion}.
+              <strong>
+                of {worklists.headline.denominator} work items are already overdue.
+              </strong>
+              <br />
+              Every item below is cryptography a quantum computer breaks, running in code you
+              reach. Each one shows who has to change it and by when. Click any row for the
+              evidence behind it.
             </div>
           </div>
 
           <div className="tracks">
             <Worklist
               title="Confidentiality"
-              subtitle="harvest-now-decrypt-later applies — this traffic is being recorded today"
+              subtitle="Traffic recorded today can be decrypted later. This clock has already started."
               findings={worklists.confidentiality}
               scanId={scanId}
               pack={pack}
@@ -211,7 +210,7 @@ export function Dashboard({
             />
             <Worklist
               title="Authenticity"
-              subtitle="forgery risk begins at the deadline — not retroactive"
+              subtitle="Nothing is at risk until a quantum computer exists. Then forgery is."
               findings={worklists.authenticity}
               scanId={scanId}
               pack={pack}
@@ -222,28 +221,40 @@ export function Dashboard({
 
           {estate !== null && estate.promoted.length > 0 && (
             <p className="aside">
-              Traces reached across the network edge into{' '}
-              {estate.promoted.map((p) => `${p.systemId} (${p.occurrences})`).join(', ')} — work that
-              static analysis inside those repositories could not see, because the caller is a
-              different service.
+              <strong>Found via traces:</strong>{' '}
+              {estate.promoted.map((p) => `${p.systemId} (${p.occurrences})`).join(', ')}. Reading
+              those repositories alone would have missed this — the caller is a different service.
             </p>
           )}
 
           {coverage !== null && coverage.unscanned.length > 0 && (
-            <p className="caveat" style={{ color: 'var(--warn)' }}>
-              Blind spots: {coverage.unscanned.join(', ')} participate in traced calls and have no
-              CBOM. Scanning your own repositories will not close this.
+            <p className="caveat warn">
+              <strong>Never scanned:</strong> {coverage.unscanned.join(', ')}. These services take
+              part in live calls and you have no inventory for them.
             </p>
           )}
 
-          <p className="aside">
-            {worklists.unreached.length} finding(s) analyzed and not reachable, and{' '}
-            {worklists.hints.length} dependency hint(s), are reported separately and are not on
-            either list. Presence is not exposure, and a library implementing an algorithm is not a
-            use of it.
-            {worklists.unanalyzed.length > 0 &&
-              ` ${worklists.unanalyzed.length} finding(s) have no call site to trace — "not looked at" is not "not reached".`}
-          </p>
+          <details className="notes">
+            <summary>
+              Not shown: {worklists.unreached.length} unreachable, {worklists.hints.length} library
+              hints
+              {worklists.unanalyzed.length > 0 ? `, ${worklists.unanalyzed.length} untraceable` : ''}
+            </summary>
+            <p>
+              <strong>Unreachable</strong> — found in the code, but nothing that serves traffic
+              calls it. Test fixtures and dead modules live here.
+            </p>
+            <p>
+              <strong>Library hints</strong> — a dependency that <em>can</em> do this, with no call
+              site found. A search hint, not a work item.
+            </p>
+            {worklists.unanalyzed.length > 0 && (
+              <p>
+                <strong>Untraceable</strong> — certificates and managed keys have no call site to
+                follow. Not looked at is not the same as not reached.
+              </p>
+            )}
+          </details>
 
           {activePack !== null && activePack.trust !== 'SIGNED' && (
             <p className="caveat" style={{ color: 'var(--late)' }}>
@@ -255,8 +266,8 @@ export function Dashboard({
 
           {activePack !== null && activePack.caveats.length > 0 && (
             <p className="caveat">
-              {activePack.regulatoryAuthority ?? 'No regulatory deadline asserted by this pack.'}{' '}
-              {activePack.caveats.join(' ')}
+              <strong>Deadline source:</strong>{' '}
+              {activePack.regulatoryAuthority ?? 'this pack sets no regulatory deadline.'}
             </p>
           )}
         </>
