@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ESTATE_SCAN,
   getCoverage,
@@ -10,6 +10,67 @@ import {
   type ScanSummary,
   type Worklists,
 } from '@/lib/api';
+
+/**
+ * A labelled control. Native selects and number inputs render with the
+ * operating system's own chrome, which on a dark surface looks like a browser
+ * dialog someone left open. The label also removes the need to explain what
+ * each dropdown is by padding its options with prose.
+ */
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+/**
+ * A number input with its own steppers.
+ *
+ * The native spinner cannot be themed - it is drawn by the platform, sits in
+ * its own tiny hit area, and is the one control on the page that looks like it
+ * belongs to a different application.
+ */
+function Stepper({
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (n: number) => void;
+}) {
+  const clamp = (n: number): number => Math.min(max, Math.max(min, n));
+  return (
+    <span className="stepper">
+      <input
+        type="number"
+        inputMode="numeric"
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+      />
+      <span className="unit">years</span>
+      <span className="arrows">
+        <button type="button" aria-label="Increase" onClick={() => onChange(clamp(value + 1))}>
+          <svg viewBox="0 0 10 6" aria-hidden="true">
+            <path d="M1 5L5 1l4 4" />
+          </svg>
+        </button>
+        <button type="button" aria-label="Decrease" onClick={() => onChange(clamp(value - 1))}>
+          <svg viewBox="0 0 10 6" aria-hidden="true">
+            <path d="M1 1l4 4 4-4" />
+          </svg>
+        </button>
+      </span>
+    </span>
+  );
+}
 
 /** Sentinel for the estate view: every system at once, correlated by traces. */
 const ESTATE = ESTATE_SCAN;
@@ -116,7 +177,7 @@ export function Dashboard({
     return (
       <div className="wrap">
         <header className="top">
-          <h1>assay</h1>
+          <h1>Assay</h1>
         </header>
         <p className="aside">
           No scans yet. Run <code>pnpm assay scan &lt;path&gt;</code> and POST the result to the API,
@@ -129,54 +190,51 @@ export function Dashboard({
   return (
     <div className="wrap">
       <header className="top">
-        <h1>assay</h1>
+        <h1>Assay</h1>
 
         <div className="controls">
-          <select value={scanId} onChange={(e) => setScanId(e.target.value)} aria-label="Scan">
-            <option value={ESTATE}>Estate — every system, correlated by traces</option>
-            {scans.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.systemName} · {s.startedAt.slice(0, 10)}
-              </option>
-            ))}
-          </select>
-
-          <select value={pack} onChange={(e) => setPack(e.target.value)} aria-label="Policy pack">
-            {packs.map((p) => (
-              <option key={p.packId} value={p.packId}>
-                {p.title}
-                {p.trust === 'SIGNED' ? '' : ` (${p.trust.toLowerCase()})`}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={comparePack}
-            onChange={(e) => setComparePack(e.target.value)}
-            aria-label="Compare against"
-          >
-            <option value="">Compare against…</option>
-            {packs
-              .filter((p) => p.packId !== pack)
-              .map((p) => (
-                <option key={p.packId} value={p.packId}>
-                  vs {p.title}
+          <Field label="Scope">
+            <select value={scanId} onChange={(e) => setScanId(e.target.value)} aria-label="Scope">
+              <option value={ESTATE}>Estate — Every System</option>
+              {scans.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.systemName} — {s.startedAt.slice(0, 10)}
                 </option>
               ))}
-          </select>
+            </select>
+          </Field>
 
-          <label className="sub">
-            Secrecy{' '}
-            <input
-              type="number"
-              min={0}
-              max={50}
-              value={secrecyYears}
-              onChange={(e) => setSecrecyYears(Number(e.target.value))}
-              style={{ width: '64px' }}
-            />
-            y
-          </label>
+          <Field label="Deadline">
+            <select value={pack} onChange={(e) => setPack(e.target.value)} aria-label="Deadline">
+              {packs.map((p) => (
+                <option key={p.packId} value={p.packId}>
+                  {p.title}
+                  {p.trust === 'SIGNED' ? '' : ` (${p.trust.toLowerCase()})`}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Compare">
+            <select
+              value={comparePack}
+              onChange={(e) => setComparePack(e.target.value)}
+              aria-label="Compare"
+            >
+              <option value="">Nothing</option>
+              {packs
+                .filter((p) => p.packId !== pack)
+                .map((p) => (
+                  <option key={p.packId} value={p.packId}>
+                    {p.title}
+                  </option>
+                ))}
+            </select>
+          </Field>
+
+          <Field label="Secrecy">
+            <Stepper value={secrecyYears} min={0} max={50} onChange={setSecrecyYears} />
+          </Field>
         </div>
       </header>
 
