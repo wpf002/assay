@@ -1,0 +1,30 @@
+{
+  "packId": "eo-14412",
+  "packVersion": "1.0.0",
+  "title": "US Executive Order 14412 (2026-06-22)",
+  "note": "Regulatory deadlines are the binding constraint for federal systems and, via the FAR rule, for covered contractors. They fall 4-5 years ahead of the CRQC horizon in this pack, so ranking on CRQC alone understates urgency. crqcYear remains the physics backstop and is an INPUT, not a truth claim.",
+  "crqcYear": 2035,
+  "deprecateYear": 2030,
+  "disallowYear": 2035,
+  "regulatoryDeadlines": {
+    "CONFIDENTIALITY": 2031.0,
+    "AUTHENTICITY": 2032.0
+  },
+  "regulatoryAuthority": "EO 14412 sec. 4 - key establishment by 2030-12-31, digital signatures by 2031-12-31, for HVAs and high-impact systems; FAR rule extends to covered contractors by 2030-12-31",
+  "migrationYearsByControl": {
+    "SELF": 0.5,
+    "VENDOR_UPGRADEABLE": 1.5,
+    "VENDOR_LOCKED": 4.0,
+    "HARDWARE": 6.0,
+    "PROTOCOL_BILATERAL": 5.0
+  },
+  "sources": [
+    "https://www.presidency.ucsb.edu/documents/executive-order-14412-securing-the-nation-against-advanced-cryptographic-attacks",
+    "Federal Register 2026-12909"
+  ],
+  "caveats": [
+    "Deadline dates are expressed as decimal years: 2031.0 means 'complete before 2031 begins', i.e. the 2030-12-31 deadline.",
+    "Sources disagree on which FAR rule falls at 180 vs 270 days. Verify against the Federal Register text before relying on the procurement dates.",
+    "CISA minimum-elements guidance for CBOMs (sec. 5(d), due ~2026-12-20) had not published when this pack was authored."
+  ]
+}

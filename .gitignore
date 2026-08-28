@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.pcap
+scan-output/
+.DS_Store

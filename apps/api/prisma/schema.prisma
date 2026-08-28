@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model System {
+  id          String       @id @default(cuid())
+  name        String
+  kind        String // repo | service | host | vendor_product
+  owner       String?
+  createdAt   DateTime     @default(now())
+  occurrences Occurrence[]
+
+  @@unique([name, kind])
+}
+
+model CryptoAsset {
+  id                       String       @id // content hash, deterministic
+  primitive                String
+  parameters               Json
+  purpose                  String
+  quantumVulnerable        Boolean
+  classicalSecurityBits    Int?
+  nistQuantumSecurityLevel Int?
+  oid                      String?
+  occurrences              Occurrence[]
+}
+
+model Occurrence {
+  id               String      @id @default(cuid())
+  asset            CryptoAsset @relation(fields: [assetId], references: [id])
+  assetId          String
+  system           System      @relation(fields: [systemId], references: [id])
+  systemId         String
+  controlClass     String
+  reachable        Boolean?
+  reachEntryPoint  String?
+  reachPath        Json? // CallFrame[], exported into CycloneDX evidence.callstack
+  confidence       Decimal     @db.Decimal(6, 4)
+  confidenceFactor Json // full recursive Factor tree
+  assertionLevel   String // CONFIRMED | OBSERVED | SUSPECTED
+  downgradeReason  String?
+
+  // Ranking is recorded per scan because it is pack-dependent. Re-ranking under
+  // a new pack must be a diff, not a rewrite (I4).
+  urgencyTrack        String? // CONFIDENTIALITY | AUTHENTICITY
+  moscaSlackYears     Decimal? @db.Decimal(6, 2)
+  crqcSlackYears      Decimal? @db.Decimal(6, 2)
+  regulatorySlackYears Decimal? @db.Decimal(6, 2)
+  bindingConstraint   String? // CRQC | REGULATORY
+  policyPackId        String?
+  policyPackVersion   String?
+
+  scan     Scan       @relation(fields: [scanId], references: [id])
+  scanId   String
+  evidence Evidence[]
+
+  @@index([systemId, assertionLevel])
+  @@index([urgencyTrack, moscaSlackYears])
+  @@index([scanId, assetId])
+}
+
+model Evidence {
+  id               String     @id @default(cuid())
+  occurrence       Occurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  occurrenceId     String
+  modality         String
+  locator          String
+  raw              String     @db.Text
+  collectedAt      DateTime
+  collectorVersion String
+  // CycloneDX evidence.occurrences shape
+  location         String?
+  line             Int?
+  offset           Int?
+  symbol           String?
+
+  @@index([occurrenceId])
+  @@index([modality])
+}
+
+model Scan {
+  id           String       @id @default(cuid())
+  startedAt    DateTime     @default(now())
+  finishedAt   DateTime?
+  detectors    String[]
+  policyPackId String
+  scopeGrantId String? // required for network detectors
+  occurrences  Occurrence[]
+}

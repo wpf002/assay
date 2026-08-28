@@ -1,0 +1,161 @@
+import { describe, expect, it } from 'vitest';
+import {
+  computeConfidence,
+  makeAsset,
+  rank,
+  type Evidence,
+  type Modality,
+  type MoscaPolicy,
+  type Occurrence,
+} from '../src/index.js';
+
+const POLICY: MoscaPolicy = {
+  packId: 'eo-14412',
+  packVersion: '1.0.0',
+  crqcYear: 2035,
+  deprecateYear: 2030,
+  disallowYear: 2035,
+  regulatoryDeadlines: { CONFIDENTIALITY: 2031.0, AUTHENTICITY: 2032.0 },
+  regulatoryAuthority: 'EO 14412 sec. 4',
+  migrationYearsByControl: {
+    SELF: 0.5,
+    VENDOR_UPGRADEABLE: 1.5,
+    VENDOR_LOCKED: 4.0,
+    HARDWARE: 6.0,
+    PROTOCOL_BILATERAL: 5.0,
+  },
+};
+
+const ev = (modality: Modality): Evidence => ({
+  modality,
+  locator: 'a.ts:1',
+  raw: 'x',
+  collectedAt: '2026-08-28T00:00:00.000Z',
+  collectorVersion: 'test',
+});
+
+const KEX = makeAsset('RSA', { modulusLength: 2048 }, 'KEY_ESTABLISHMENT');
+const SIG = makeAsset('ECDSA', { curve: 'P-256' }, 'DIGITAL_SIGNATURE');
+const SAFE = makeAsset('ML-KEM', { parameterSet: '768' }, 'KEY_ESTABLISHMENT');
+
+const occ = (id: string, assetId: string, o: Partial<Occurrence> = {}): Occurrence => ({
+  id,
+  assetId,
+  systemId: 'svc',
+  controlClass: 'SELF',
+  reachability: null,
+  evidence: [ev('SOURCE_AST')],
+  confidence: computeConfidence([ev('SOURCE_AST')]),
+  ...o,
+});
+
+const reach = (reachable: boolean): Occurrence['reachability'] => ({
+  reachable,
+  entryPoint: reachable ? 'http:GET /' : null,
+  path: [],
+  factor: { kind: 'INFERENCE', label: 'reachability', value: reachable, weight: 1, sources: [] },
+});
+
+const OPTS = {
+  policy: POLICY,
+  currentYear: 2026.66,
+  secrecyLifetime: () => ({ years: 5, assumed: false }),
+};
+
+describe('two worklists', () => {
+  it('never pools confidentiality and authenticity', () => {
+    const w = rank(
+      [occ('a', KEX.id, { reachability: reach(true) }), occ('b', SIG.id, { reachability: reach(true) })],
+      [KEX, SIG],
+      OPTS,
+    );
+    expect(w.confidentiality.map((f) => f.occurrenceId)).toEqual(['a']);
+    expect(w.authenticity.map((f) => f.occurrenceId)).toEqual(['b']);
+  });
+
+  it('excludes quantum-safe assets from the worklists entirely', () => {
+    const w = rank([occ('s', SAFE.id, { reachability: reach(true) })], [SAFE], OPTS);
+    expect(w.confidentiality).toHaveLength(0);
+    expect(w.headline.denominator).toBe(0);
+  });
+
+  it('sorts by ascending slack so the most overdue item is row one', () => {
+    const w = rank(
+      [
+        occ('slow', KEX.id, { controlClass: 'HARDWARE', reachability: reach(true) }),
+        occ('fast', KEX.id, { controlClass: 'SELF', reachability: reach(true) }),
+      ],
+      [KEX],
+      OPTS,
+    );
+    expect(w.confidentiality.map((f) => f.occurrenceId)).toEqual(['slow', 'fast']);
+  });
+});
+
+describe('I5: presence is not exposure', () => {
+  it('reports unreached findings separately and keeps them out of the headline', () => {
+    const w = rank(
+      [
+        occ('prod', KEX.id, { reachability: reach(true) }),
+        occ('fixture', KEX.id, { reachability: reach(false) }),
+      ],
+      [KEX],
+      OPTS,
+    );
+    expect(w.confidentiality.map((f) => f.occurrenceId)).toEqual(['prod']);
+    expect(w.unreached.map((f) => f.occurrenceId)).toEqual(['fixture']);
+    expect(w.headline.denominator).toBe(1);
+  });
+
+  it('distinguishes "not analyzed" from "analyzed and not reached"', () => {
+    const w = rank([occ('u', KEX.id)], [KEX], OPTS);
+    expect(w.unreached).toHaveLength(0);
+    expect(w.confidentiality).toHaveLength(1);
+    expect(w.confidentiality[0]?.reachable).toBeNull();
+  });
+});
+
+describe('headline metric', () => {
+  it('is a ratio with a walkable derivation, not a heuristic score', () => {
+    const w = rank(
+      [
+        occ('late', KEX.id, { controlClass: 'HARDWARE', reachability: reach(true) }),
+        occ('ok', SIG.id, { controlClass: 'SELF', reachability: reach(true) }),
+      ],
+      [KEX, SIG],
+      OPTS,
+    );
+    expect(w.headline.numerator).toBe(1);
+    expect(w.headline.denominator).toBe(2);
+    expect(w.headline.value).toBe(0.5);
+    expect(w.headline.factor.sources.length).toBeGreaterThan(0);
+  });
+
+  it('counts only CONFIRMED findings', () => {
+    const weak = occ('weak', KEX.id, {
+      evidence: [ev('BINARY_STRING')],
+      confidence: computeConfidence([ev('BINARY_STRING')]),
+      reachability: reach(true),
+    });
+    const w = rank([weak], [KEX], OPTS);
+    expect(w.confidentiality).toHaveLength(1);
+    expect(w.headline.denominator).toBe(0);
+  });
+});
+
+describe('re-ranking under a different pack is a diff', () => {
+  it('changes lateness without changing the finding set', () => {
+    const physics: MoscaPolicy = {
+      ...POLICY,
+      packId: 'nist-ir-8547-draft',
+      regulatoryDeadlines: { CONFIDENTIALITY: null, AUTHENTICITY: null },
+      regulatoryAuthority: null,
+    };
+    const occs = [occ('sig', SIG.id, { controlClass: 'HARDWARE', reachability: reach(true) })];
+    const eo = rank(occs, [SIG], OPTS);
+    const nist = rank(occs, [SIG], { ...OPTS, policy: physics });
+    expect(eo.authenticity[0]?.late).toBe(true);
+    expect(nist.authenticity[0]?.late).toBe(false);
+    expect(eo.authenticity).toHaveLength(nist.authenticity.length);
+  });
+});

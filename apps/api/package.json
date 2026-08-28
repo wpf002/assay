@@ -1,0 +1,21 @@
+{
+  "name": "@assay/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@assay/core": "workspace:*",
+    "@assay/policy": "workspace:*",
+    "fastify": "^5.0.0",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/helmet": "^12.0.0",
+    "zod": "^3.23.8"
+  }
+}
