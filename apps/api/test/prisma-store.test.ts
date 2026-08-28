@@ -1,10 +1,21 @@
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { toCycloneDX } from '@assay/core';
 import { scanSource } from '@assay/detect-source';
 import { analyzeReachability, assemble } from '@assay/correlate';
+import { PrismaClient } from '@prisma/client';
 import { PrismaScanStore } from '../src/store/prisma.js';
 import type { StoredScan } from '../src/store/types.js';
+
+/**
+ * Everything this suite creates is prefixed and deleted afterwards.
+ *
+ * These tests point at whatever DATABASE_URL is set, which in practice is a
+ * developer's own database. Leaving rows behind fills the app with
+ * `pg-test-*` systems that look like a real estate, which is worse than
+ * useless in a tool whose entire job is telling you what you actually run.
+ */
+const PREFIX = 'assay-pgtest-';
 
 /**
  * Round-trip through Postgres.
@@ -21,13 +32,25 @@ const maybe = url === undefined || url === '' ? describe.skip : describe;
 const FIXTURE = resolve(__dirname, '../../../fixtures/sample-repo');
 const T = '2026-08-28T00:00:00.000Z';
 
+async function cleanup(): Promise<void> {
+  if (url === undefined || url === '') return;
+  const prisma = new PrismaClient({ datasources: { db: { url } } });
+  try {
+    await prisma.scan.deleteMany({ where: { systemName: { startsWith: PREFIX } } });
+    await prisma.system.deleteMany({ where: { name: { startsWith: PREFIX } } });
+    await prisma.traceBundle.deleteMany({ where: { id: { startsWith: PREFIX } } });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 async function fixtureScan(id: string): Promise<StoredScan> {
   const source = await scanSource({ root: FIXTURE, systemId: 'sample', collectedAt: T });
   const assembled = assemble(source.findings);
   const reach = analyzeReachability(assembled.occurrences, source.graph);
   return {
     id,
-    systemName: `pg-test-${id}`,
+    systemName: `${PREFIX}${id}`,
     startedAt: T,
     finishedAt: T,
     detectors: ['detect-source'],
@@ -50,6 +73,9 @@ const cbomOf = (scan: StoredScan): string =>
   );
 
 maybe('postgres round trip', () => {
+  beforeAll(cleanup);
+  afterAll(cleanup);
+
   it('returns a scan whose CBOM is byte-identical to the one that went in', async () => {
     const store = PrismaScanStore.fromUrl(url as string);
     try {
@@ -83,16 +109,16 @@ maybe('postgres round trip', () => {
     const store = PrismaScanStore.fromUrl(url as string);
     try {
       const stamp = Date.now().toString(36);
-      const first = { ...(await fixtureScan(`d1-${stamp}`)), systemName: `pg-diff-${stamp}` };
+      const first = { ...(await fixtureScan(`d1-${stamp}`)), systemName: `${PREFIX}diff-${stamp}` };
       const second = {
         ...(await fixtureScan(`d2-${stamp}`)),
-        systemName: `pg-diff-${stamp}`,
+        systemName: `${PREFIX}diff-${stamp}`,
         startedAt: '2026-09-01T00:00:00.000Z',
       };
       await store.put(first);
       await store.put(second);
 
-      const recent = await store.recent(`pg-diff-${stamp}`, 5);
+      const recent = await store.recent(`${PREFIX}diff-${stamp}`, 5);
       expect(recent.map((s) => s.id)).toEqual([second.id, first.id]);
       // The same work item exists in both, with the same stable id.
       expect(recent[0]?.occurrences[0]?.id).toBe(recent[1]?.occurrences[0]?.id);
@@ -103,6 +129,8 @@ maybe('postgres round trip', () => {
 });
 
 maybe('trace persistence', () => {
+  afterAll(cleanup);
+
   it('keeps the edges and has nowhere to put the spans', async () => {
     const store = PrismaScanStore.fromUrl(url as string);
     try {
@@ -139,7 +167,7 @@ maybe('trace persistence', () => {
       const stamp = Date.now().toString(36);
       for (const [i, at] of ['2026-08-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z'].entries()) {
         await store.putTraces({
-          id: `latest-${stamp}-${i}`,
+          id: `${PREFIX}latest-${stamp}-${i}`,
           source: 'tempo',
           windowFrom: at,
           windowTo: at,
@@ -149,7 +177,7 @@ maybe('trace persistence', () => {
           edges: [],
         });
       }
-      expect((await store.latestTraces())?.id).toBe(`latest-${stamp}-1`);
+      expect((await store.latestTraces())?.id).toBe(`${PREFIX}latest-${stamp}-1`);
     } finally {
       await store.close();
     }
@@ -159,7 +187,7 @@ maybe('trace persistence', () => {
     const store = PrismaScanStore.fromUrl(url as string);
     try {
       const stamp = Date.now().toString(36);
-      const system = `estate-${stamp}`;
+      const system = `${PREFIX}estate-${stamp}`;
       const first = { ...(await fixtureScan(`e1-${stamp}`)), systemName: system };
       const second = {
         ...(await fixtureScan(`e2-${stamp}`)),
