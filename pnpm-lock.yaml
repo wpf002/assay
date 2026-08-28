@@ -92,6 +92,9 @@ importers:
       '@assay/core':
         specifier: workspace:*
         version: link:../core
+      '@assay/detect-source':
+        specifier: workspace:*
+        version: link:../detect-source
       '@assay/policy':
         specifier: workspace:*
         version: link:../policy

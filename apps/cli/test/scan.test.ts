@@ -2,7 +2,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assemble } from '@assay/correlate';
+import { analyzeReachability, assemble, divergences } from '@assay/correlate';
 import { scanSource } from '@assay/detect-source';
 import { scanDependencies } from '@assay/detect-deps';
 import { decimalYear, loadPack } from '@assay/policy';
@@ -22,7 +22,10 @@ async function scan() {
     scanSource({ root: ROOT, systemId: 'sample', collectedAt: COLLECTED }),
     scanDependencies({ root: ROOT, systemId: 'sample', collectedAt: COLLECTED }),
   ]);
-  const { occurrences, assets } = assemble([...source.findings, ...deps.findings]);
+  const assembled = assemble([...source.findings, ...deps.findings]);
+  const reach = analyzeReachability(assembled.occurrences, source.graph);
+  const occurrences = reach.occurrences;
+  const assets = assembled.assets;
   const pack = loadPack('eo-14412');
   const worklists = rank(occurrences, assets, {
     policy: pack,
@@ -35,7 +38,7 @@ async function scan() {
     timestamp: COLLECTED,
     toolVersion: 'test',
   });
-  return { source, deps, occurrences, assets, worklists, cbom };
+  return { source, deps, occurrences, assets, worklists, cbom, reach };
 }
 
 describe('phase 1 pipeline', () => {
@@ -146,5 +149,58 @@ describe('the CBOM on disk', () => {
     await writeFile(path, JSON.stringify(cbom, null, 2));
     const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
     expect((parsed as { bomFormat: string }).bomFormat).toBe('CycloneDX');
+  });
+});
+
+describe('phase 3: reachability on the fixture tree', () => {
+  it('finds the http entry point and analyzes from it', async () => {
+    const { reach } = await scan();
+    expect(reach.analyzed).toBe(true);
+    expect(reach.entryPoints).toContain('src/server.ts');
+  });
+
+  it('marks the test-only cipher unreached', async () => {
+    const { occurrences, assets } = await scan();
+    const rc4 = assets.find((a) => a.primitive === 'RC4');
+    const occ = occurrences.find((o) => o.assetId === rc4?.id);
+    expect(occ?.reachability?.reachable).toBe(false);
+  });
+
+  it('marks the module nothing imports unreached', async () => {
+    const { occurrences, assets } = await scan();
+    const tdes = assets.find((a) => a.primitive === '3DES' && a.parameters['mode'] === 'CBC');
+    const occs = occurrences.filter((o) => o.assetId === tdes?.id);
+    // The sshd_config 3DES is deployed configuration and reached; the one in
+    // src/unused.ts is not. Same asset, different work items.
+    expect(occs.some((o) => o.reachability?.reachable === false)).toBe(true);
+  });
+
+  it('ships the path for a reached finding', async () => {
+    const { occurrences } = await scan();
+    const withPath = occurrences.find((o) => (o.reachability?.path.length ?? 0) > 0);
+    expect(withPath?.reachability?.path[0]?.fullFilename).toBe('src/server.ts');
+  });
+
+  it('keeps every unreached finding out of both worklists', async () => {
+    const { worklists } = await scan();
+    expect(worklists.confidentiality.every((f) => f.reachable === true)).toBe(true);
+    expect(worklists.authenticity.every((f) => f.reachable === true)).toBe(true);
+    expect(worklists.unreached.length).toBeGreaterThan(0);
+  });
+
+  it('emits the reachability path into CycloneDX evidence.callstack', async () => {
+    const { cbom } = await scan();
+    const s = JSON.stringify(cbom);
+    expect(s).toContain('callstack');
+    expect(s).toContain('src/server.ts');
+    // An empty callstack would read as "we traced this" when nothing was traced.
+    expect(s).not.toContain('"callstack":{"frames":[]}');
+  });
+
+  it('names capability/deployment divergences, or none when only one view exists', async () => {
+    const { occurrences, assets } = await scan();
+    // The fixture is a source-and-config scan with a certificate on disk, so a
+    // real divergence set requires a probe. Assert the shape, not a count.
+    expect(Array.isArray(divergences(occurrences, assets))).toBe(true);
   });
 });

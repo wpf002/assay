@@ -1,10 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import { relative, resolve } from 'node:path';
+import { basename, dirname, join, normalize, relative, resolve } from 'node:path';
 import fg from 'fast-glob';
 import { makeAsset, type ControlClass, type Evidence, type Finding, type Modality } from '@assay/core';
 import { languageFor, parseSource } from './parsers/index.js';
 import { ruleIndex } from './rules/index.js';
 import { configKindFor, parseConfig } from './config/index.js';
+import { buildModuleNode, functionsAt, type ModuleGraph, type ModuleNode } from './graph.js';
 import type { Detection } from './types.js';
 
 export * from './types.js';
@@ -12,6 +13,7 @@ export * from './types.js';
 export { languageFor, parseSource } from './parsers/index.js';
 export { RULES, ruleIndex, TYPESCRIPT_RULES, PYTHON_RULES } from './rules/index.js';
 export { configKindFor, parseConfig } from './config/index.js';
+export * from './graph.js';
 
 export const COLLECTOR_VERSION = 'detect-source/0.1.0';
 
@@ -48,6 +50,8 @@ export interface SourceScanResult {
   readonly findings: readonly Finding[];
   readonly filesScanned: number;
   readonly filesSkipped: readonly { readonly file: string; readonly reason: string }[];
+  /** Import graph and within-file liveness, for Phase 3 reachability. */
+  readonly graph: ModuleGraph;
 }
 
 export async function scanSource(opts: SourceScanOptions): Promise<SourceScanResult> {
@@ -59,6 +63,10 @@ export async function scanSource(opts: SourceScanOptions): Promise<SourceScanRes
   const files = await fg(
     [
       '**/*.{ts,tsx,mts,cts,js,mjs,cjs,jsx,py,pyi}',
+      '**/package.json',
+      '**/pyproject.toml',
+      '**/setup.py',
+      '**/setup.cfg',
       '**/nginx.conf',
       '**/*nginx*.conf',
       '**/openssl.cnf',
@@ -72,6 +80,10 @@ export async function scanSource(opts: SourceScanOptions): Promise<SourceScanRes
 
   const findings: Finding[] = [];
   const skipped: { file: string; reason: string }[] = [];
+  const nodes = new Map<string, ModuleNode>();
+  const packages = new Map<string, string>();
+  const publishedDirs = new Set<string>();
+  const packageEntryHints: string[] = [];
   let scanned = 0;
 
   // Sorted so a scan of the same tree produces evidence in the same order.
@@ -87,6 +99,21 @@ export async function scanSource(opts: SourceScanOptions): Promise<SourceScanRes
       source = buf.toString('utf8');
     } catch (e) {
       skipped.push({ file: rel, reason: `unreadable: ${String(e)}` });
+      continue;
+    }
+
+    const base = basename(abs);
+    if (base === 'package.json') {
+      collectPackage(rel, source, packages, packageEntryHints, publishedDirs);
+      continue;
+    }
+    if (base === 'pyproject.toml' || base === 'setup.py' || base === 'setup.cfg') {
+      // Python has no single manifest field naming the entry file, so only the
+      // package boundary is recorded. That is what the published-surface test
+      // needs; the entry points come from __main__ and framework detection.
+      const dir = dirname(rel) === '.' ? '' : dirname(rel);
+      packages.set(`py:${dir || '<root>'}`, dir);
+      publishedDirs.add(dir);
       continue;
     }
 
@@ -127,6 +154,8 @@ export async function scanSource(opts: SourceScanOptions): Promise<SourceScanRes
       continue;
     }
 
+    nodes.set(rel, buildModuleNode({ file: rel, lang, root: parsed.root, source }));
+
     const index = ruleIndex(lang);
     for (const call of parsed.calls) {
       const rules = index.get(call.method);
@@ -141,7 +170,10 @@ export async function scanSource(opts: SourceScanOptions): Promise<SourceScanRes
               location: rel,
               line: call.line,
               offset: call.column,
-              symbol: call.callee,
+              // The enclosing function chain, not just the callee. Reachability
+              // needs to know which function holds the call site, and the CBOM
+              // callstack needs a name for the frame.
+              symbol: [...functionsAt(parsed.root, lang, call.line), call.callee].join(' > '),
             }),
           );
         }
@@ -149,7 +181,87 @@ export async function scanSource(opts: SourceScanOptions): Promise<SourceScanRes
     }
   }
 
-  return { findings, filesScanned: scanned, filesSkipped: skipped };
+  const packageEntries = [...new Set(packageEntryHints)]
+    .map((hint) => resolveInTree(hint, nodes))
+    .filter((f): f is string => f !== null)
+    .sort();
+
+  return {
+    findings,
+    filesScanned: scanned,
+    filesSkipped: skipped,
+    graph: { nodes, packages, packageEntries, publishedDirs },
+  };
+}
+
+const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.py'];
+
+/** Resolve an extensionless or dist-pointing hint onto a file we actually parsed. */
+export function resolveInTree(hint: string, nodes: ReadonlyMap<string, unknown>): string | null {
+  const candidates = [
+    hint,
+    hint.replace(/\.(js|mjs|cjs)$/, ''),
+    // A package main almost always points at build output that does not exist
+    // in a source tree. src/ is where the same entry lives before compilation.
+    hint.replace(/(^|\/)(dist|build|lib|out)\//, '$1src/'),
+    hint.replace(/(^|\/)(dist|build|lib|out)\//, '$1src/').replace(/\.(js|mjs|cjs)$/, ''),
+  ];
+  for (const c of candidates) {
+    if (nodes.has(c)) return c;
+    for (const ext of SOURCE_EXTENSIONS) {
+      if (nodes.has(c + ext)) return c + ext;
+      if (nodes.has(`${c}/index${ext}`)) return `${c}/index${ext}`;
+    }
+  }
+  return null;
+}
+
+function collectPackage(
+  rel: string,
+  source: string,
+  packages: Map<string, string>,
+  entries: string[],
+  publishedDirs: Set<string>,
+): void {
+  let json: unknown;
+  try {
+    json = JSON.parse(source);
+  } catch {
+    return;
+  }
+  if (typeof json !== 'object' || json === null) return;
+  const pkg = json as Record<string, unknown>;
+  const name = typeof pkg['name'] === 'string' ? pkg['name'] : null;
+  const dir = dirname(rel) === '.' ? '' : dirname(rel);
+  if (name !== null) packages.set(name, dir);
+
+  const hints: string[] = [];
+  for (const field of ['main', 'module', 'types'] as const) {
+    const v = pkg[field];
+    if (typeof v === 'string') hints.push(v);
+  }
+  const bin = pkg['bin'];
+  if (typeof bin === 'string') hints.push(bin);
+  else if (typeof bin === 'object' && bin !== null) {
+    for (const v of Object.values(bin as Record<string, unknown>)) {
+      if (typeof v === 'string') hints.push(v);
+    }
+  }
+  collectExports(pkg['exports'], hints);
+
+  if (hints.length > 0) publishedDirs.add(dir);
+  for (const hint of hints) {
+    entries.push(normalize(join(dir, hint)).replace(/\\/g, '/'));
+  }
+}
+
+function collectExports(value: unknown, out: string[]): void {
+  if (typeof value === 'string') {
+    out.push(value);
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  for (const v of Object.values(value as Record<string, unknown>)) collectExports(v, out);
 }
 
 function hasImport(imports: ReadonlySet<string>, module: string): boolean {

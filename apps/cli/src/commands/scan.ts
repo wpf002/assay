@@ -10,7 +10,7 @@ import {
   type RankedFinding,
   type Worklists,
 } from '@assay/core';
-import { assemble } from '@assay/correlate';
+import { analyzeReachability, assemble } from '@assay/correlate';
 import { scanSource } from '@assay/detect-source';
 import { scanDependencies } from '@assay/detect-deps';
 import { scanCertificates } from '@assay/detect-pki';
@@ -52,7 +52,12 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
     findings.push(...kms);
     kmsKeys = inventory.keys.length;
   }
-  const { occurrences, assets } = assemble(findings);
+  const assembled = assemble(findings);
+  // Presence is not exposure (I5). Reachability runs before ranking so that
+  // unreached findings never reach a worklist in the first place.
+  const reach = analyzeReachability(assembled.occurrences, source.graph);
+  const occurrences = reach.occurrences;
+  const assets = assembled.assets;
 
   const secrecyYears = Number(options.secrecyYears);
   const worklists = rank(occurrences, assets, {
@@ -93,6 +98,8 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
     assets,
     worklists,
     out: options.out,
+    entryPoints: reach.entryPoints,
+    reachabilityAnalyzed: reach.analyzed,
   });
 }
 
@@ -109,6 +116,8 @@ interface ReportInput {
   readonly assets: readonly CryptoAsset[];
   readonly worklists: Worklists;
   readonly out: string;
+  readonly entryPoints: readonly string[];
+  readonly reachabilityAnalyzed: boolean;
 }
 
 function report(r: ReportInput): void {
@@ -126,6 +135,11 @@ function report(r: ReportInput): void {
       ` -> ${r.assets.length} asset(s), ${r.occurrences.length} occurrence(s)`,
   );
   line(`  policy ${r.pack}`);
+  line(
+    r.reachabilityAnalyzed
+      ? `  reachability from ${r.entryPoints.length} entry point(s): ${r.entryPoints.slice(0, 3).join(', ')}${r.entryPoints.length > 3 ? ', ...' : ''}`
+      : '  reachability not analyzed: no entry point found (presence is not exposure, so nothing is claimed)',
+  );
   line();
 
   // Two worklists. Never one. The EO splits its own deadlines the same way.
@@ -147,7 +161,10 @@ function report(r: ReportInput): void {
     );
   }
   if (w.unanalyzed.length > 0) {
-    line(`unanalyzed ${w.unanalyzed.length} finding(s) - reachability analysis is Phase 3`);
+    line(
+      `unanalyzed ${w.unanalyzed.length} finding(s) - no call site to trace ` +
+        '(certificates, managed keys); "not looked at" is not "not reached"',
+    );
   }
   if (r.uncatalogued.length > 0) {
     line(
@@ -159,6 +176,20 @@ function report(r: ReportInput): void {
   line(`cbom      ${r.out}`);
   line();
 }
+
+/**
+ * How reachability was concluded. "reached from a request handler" and
+ * "published, so somebody's handler might" justify different urgency, and a
+ * bare boolean cannot say which one you are looking at.
+ */
+const VIA_LABEL: Readonly<Record<string, string>> = {
+  OBSERVED: 'on the wire',
+  ENTRY_POINT: 'from entry point',
+  DEPLOYED_CONFIG: 'deployed config',
+  LIBRARY_SURFACE: 'published surface',
+  UNANALYZED: '',
+  NONE: '',
+};
 
 /** Two assets can share a name and differ only by purpose. Show the purpose. */
 const PURPOSE_LABEL: Readonly<Record<RankedFinding['purpose'], string>> = {
@@ -183,8 +214,8 @@ function track(title: string, findings: readonly RankedFinding[], line: (s?: str
     line(
       `  ${(f.late ? 'LATE' : '    ').padEnd(5)}${slack.padStart(7)}  ` +
         `${f.assertionLevel.padEnd(9)} ${f.controlClass.padEnd(19)} ` +
-        `${PURPOSE_LABEL[f.purpose].padEnd(9)} ${f.assetName.padEnd(38)} ` +
-        `${f.bindingConstraint.toLowerCase()}`,
+        `${PURPOSE_LABEL[f.purpose].padEnd(9)} ${f.assetName.padEnd(36)} ` +
+        `${f.bindingConstraint.toLowerCase().padEnd(11)} ${VIA_LABEL[f.reachedVia] ?? ''}`,
     );
   }
   if (findings.length > 20) line(`  ... ${findings.length - 20} more`);

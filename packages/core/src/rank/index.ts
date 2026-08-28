@@ -1,6 +1,12 @@
 import { gate, type AssertionLevel } from '../cbom/index.js';
 import { scoreMosca, type MoscaPolicy, type MoscaResult } from '../mosca/index.js';
-import { trackFor, type CryptoAsset, type Occurrence, type UrgencyTrack } from '../types/crypto-asset.js';
+import {
+  trackFor,
+  type CryptoAsset,
+  type Occurrence,
+  type ReachabilityVia,
+  type UrgencyTrack,
+} from '../types/crypto-asset.js';
 import type { Factor } from '../types/factor.js';
 
 /**
@@ -28,6 +34,8 @@ export interface RankedFinding {
   readonly late: boolean;
   readonly bindingConstraint: MoscaResult['bindingConstraint'];
   readonly reachable: boolean | null;
+  /** How reachability was concluded. ENTRY_POINT is a stronger claim than LIBRARY_SURFACE. */
+  readonly reachedVia: ReachabilityVia | 'UNANALYZED';
   readonly downgradeReason: string | null;
 }
 
@@ -127,6 +135,7 @@ export function rank(
       late: mosca.late,
       bindingConstraint: mosca.bindingConstraint,
       reachable: o.reachability === null ? null : o.reachability.reachable,
+      reachedVia: o.reachability === null ? 'UNANALYZED' : o.reachability.via,
       downgradeReason: g.downgradeReason,
     });
   }

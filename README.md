@@ -62,7 +62,7 @@ pnpm assay policy list
 
 RSA in a dev dependency's test fixture and RSA on the payment API key exchange are not the same work item. Occurrences carry a reachability determination, and unreached findings are reported separately rather than padding the count. "Not yet analyzed" is a third state, never collapsed into "not reached."
 
-Competitors claim reachability. Assay ships the **path**, in CycloneDX `evidence.callstack`, where someone who does not trust us can check it.
+Competitors claim reachability. Assay ships the **path**, in CycloneDX `evidence.callstack`, where someone who does not trust us can check it — and it says *how* it concluded reachability, because "a request handler calls this" and "this module is published, so somebody's handler might" are different claims: `OBSERVED`, `ENTRY_POINT`, `DEPLOYED_CONFIG`, `LIBRARY_SURFACE`, or `NONE`.
 
 ---
 
@@ -170,8 +170,8 @@ Discovery is table stakes and several of these do it competently. The gap Assay 
 
 ## Status
 
-Phases 0, 1 and 2 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
+Phases 0 through 3 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
 
 Phase 1's exit gate was a kill condition, and it passed: two disjoint hand-verified samples across django, Ghost and n8n scored 96.7% and 100% precision at `CONFIRMED`, and 834k LOC of n8n reduced to eleven work items. Details, including what the run does *not* establish, are in [VALIDATION.md](VALIDATION.md). Phase 2 added the scope gate, certificate inventory with a lifetime-vs-deadline check, TLS/SSH capability enumeration, and cloud key-store classification. Its exit gate — that an out-of-scope probe fails at the type level rather than at runtime — is asserted by a compile-time test that runs under `tsc` in CI.
 
-Next is Phase 3, reachability and correlation — see [ROADMAP.md](ROADMAP.md).
+Phase 3 added reachability with a shipped path, and kept capability and deployment as separate answers rather than resolving one into the other. Next is Phase 4, the API and web surface — see [ROADMAP.md](ROADMAP.md).

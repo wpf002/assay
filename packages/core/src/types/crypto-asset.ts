@@ -104,8 +104,21 @@ export interface CallFrame {
  * Reachability. Presence is not exposure (I5). Competitors claim reachability;
  * the differentiator is shipping the PATH, in a field a third party can check.
  */
+/**
+ * How the conclusion was reached. A bare boolean cannot distinguish "a request
+ * handler calls this" from "this module is published, so somebody's handler
+ * might", and those justify very different urgency.
+ */
+export type ReachabilityVia =
+  | 'OBSERVED' // seen on the wire; not an inference at all
+  | 'ENTRY_POINT' // a static path exists from a server or main
+  | 'DEPLOYED_CONFIG' // configuration that describes a running deployment
+  | 'LIBRARY_SURFACE' // inside a published package, so reachable by its consumers
+  | 'NONE';
+
 export interface Reachability {
   readonly reachable: boolean;
+  readonly via: ReachabilityVia;
   /** The entry point the path starts from, e.g. "http:POST /v1/payments". */
   readonly entryPoint: string | null;
   readonly path: readonly CallFrame[];

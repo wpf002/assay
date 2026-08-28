@@ -244,7 +244,12 @@ function component(
   // Reachability paths ride in evidence.callstack. Every competitor claims
   // reachability; shipping the path in a standard field is what makes the
   // claim checkable by someone who does not trust us.
-  const reached = gs.find((g) => g.occurrence.reachability?.reachable === true);
+  // Only when there is an actual path. A `callstack: { frames: [] }` is noise
+  // that reads as "we traced this" when we did not - config and network
+  // evidence are reached without any call path existing to show.
+  const reached = gs.find(
+    (g) => g.occurrence.reachability?.reachable === true && g.occurrence.reachability.path.length > 0,
+  );
   const callstack =
     reached && reached.occurrence.reachability
       ? {

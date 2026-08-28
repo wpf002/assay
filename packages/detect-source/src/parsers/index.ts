@@ -54,6 +54,8 @@ export function languageFor(file: string): Lang | null {
 export interface ParsedFile {
   readonly context: FileContext;
   readonly calls: readonly CallSite[];
+  /** Retained so the module graph can be built without re-parsing. */
+  readonly root: Parser.SyntaxNode;
 }
 
 export function parseSource(file: string, source: string, lang: Lang): ParsedFile {
@@ -79,7 +81,7 @@ export function parseSource(file: string, source: string, lang: Lang): ParsedFil
     }
   }
 
-  return { context: { file, lang, imports, aliases }, calls };
+  return { context: { file, lang, imports, aliases }, calls, root: tree.rootNode };
 }
 
 /* --------------------------------------------------------------- callee names */

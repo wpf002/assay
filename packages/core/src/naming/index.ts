@@ -60,7 +60,11 @@ export function hashFromName(name: string): AlgoSpec | null {
  */
 export function cipherFromName(name: string): AlgoSpec | null {
   const n = name.trim().toLowerCase();
-  if (/^(des-ede3|3des|desede|des3)/.test(n)) {
+  // OpenSSL spells 3DES four different ways depending on where it appears:
+  // `DES-EDE3-CBC` in a cipher spec, `DES-CBC3-SHA` in a TLS suite name,
+  // `3des-cbc` on the SSH wire, `DESede` in Java. Missing one of them means a
+  // 3DES endpoint silently reports as having no bulk cipher at all.
+  if (/^(des-ede3|des-cbc3|3des|desede|des3)/.test(n)) {
     return { primitive: '3DES', parameters: { ...modeOf(n) }, purpose: 'DATA_ENCRYPTION' };
   }
   if (/^(rc4|arcfour|arc4)/.test(n)) {
@@ -276,12 +280,30 @@ export function tlsCipherSuite(name: string): readonly AlgoSpec[] {
     if (c) out.push(c);
     return out;
   }
-  if (/ECDHE/.test(n)) out.push({ primitive: 'ECDH', parameters: { ephemeral: 'true' }, purpose: 'KEY_ESTABLISHMENT' });
-  else if (/DHE/.test(n)) out.push({ primitive: 'DH', parameters: { ephemeral: 'true' }, purpose: 'KEY_ESTABLISHMENT' });
-  else if (/^(TLS_)?RSA/.test(n)) out.push({ primitive: 'RSA', parameters: { mode: 'KEY_TRANSPORT' }, purpose: 'KEY_ESTABLISHMENT' });
+  const bare = n.replace(/^TLS[-_]/, '');
 
-  if (/ECDSA/.test(n)) out.push({ primitive: 'ECDSA', parameters: {}, purpose: 'CERTIFICATE_AUTH' });
-  else if (/RSA/.test(n)) out.push({ primitive: 'RSA', parameters: {}, purpose: 'CERTIFICATE_AUTH' });
+  if (/ECDHE|EECDH/.test(bare)) {
+    out.push({ primitive: 'ECDH', parameters: { ephemeral: 'true' }, purpose: 'KEY_ESTABLISHMENT' });
+  } else if (/DHE|EDH/.test(bare)) {
+    out.push({ primitive: 'DH', parameters: { ephemeral: 'true' }, purpose: 'KEY_ESTABLISHMENT' });
+  } else if (/^ECDH[-_]/.test(bare)) {
+    out.push({ primitive: 'ECDH', parameters: { ephemeral: 'false' }, purpose: 'KEY_ESTABLISHMENT' });
+  } else if (/^DH[-_]/.test(bare)) {
+    out.push({ primitive: 'DH', parameters: { ephemeral: 'false' }, purpose: 'KEY_ESTABLISHMENT' });
+  } else if (!/^(ADH|AECDH|PSK|SRP|KRB5|GOST|NULL|AECDHE)/.test(bare)) {
+    // OpenSSL names the RSA key-transport suites with no key-exchange prefix
+    // at all: AES128-SHA, AES256-GCM-SHA384, DES-CBC3-SHA. Requiring an "RSA"
+    // token misses every one of them - and static RSA key transport is the
+    // single worst case for harvest-now-decrypt-later, because one leaked
+    // private key retroactively opens every recorded session.
+    out.push({ primitive: 'RSA', parameters: { mode: 'KEY_TRANSPORT' }, purpose: 'KEY_ESTABLISHMENT' });
+  }
+
+  if (/ECDSA/.test(bare)) out.push({ primitive: 'ECDSA', parameters: {}, purpose: 'CERTIFICATE_AUTH' });
+  else if (/DSS/.test(bare)) out.push({ primitive: 'DSA', parameters: {}, purpose: 'CERTIFICATE_AUTH' });
+  else if (!/^(ADH|AECDH|PSK|SRP|NULL)/.test(bare)) {
+    out.push({ primitive: 'RSA', parameters: {}, purpose: 'CERTIFICATE_AUTH' });
+  }
 
   const bulk = /(AES[-_]?(?:128|256)[-_]?(?:GCM|CBC|CCM)|CHACHA20[-_]POLY1305|3DES|DES[-_]CBC3|RC4)/.exec(n);
   if (bulk?.[1]) {

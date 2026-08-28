@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
+import { used } from './helpers.js';
 
 export function issueKeyPair() {
   return crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -18,7 +19,7 @@ export function legacyDigest(data: string) {
 }
 
 export function fingerprint(data: string) {
-  return crypto.createHash('sha256').update(data).digest('hex');
+  return used(crypto.createHash('sha256').update(data).digest('hex'));
 }
 
 export function weakCipher(key: Buffer, iv: Buffer) {

@@ -123,7 +123,7 @@ Assay records that a key exists, its algorithm, and its size. It never reads, st
 | 0 | Substrate + core engine | done |
 | 1 | Source + dependency, TS/Python | **the whole bet** — done, gate passed |
 | 2 | Scope gate, KMS, PKI, network | done — adds the independent modalities I1 needs |
-| 3 | Correlation + reachability | where it becomes worth money |
+| 3 | Correlation + reachability | done — where it becomes worth money |
 | 4 | API, persistence, web | makes the derivation clickable |
 | 5 | Binary analysis | last on purpose |
 | 6 | Language expansion + CI | breadth after depth |
@@ -191,6 +191,8 @@ Reordered from the original plan: cloud KMS/HSM/KMIP enumeration lands *before* 
 
 ## 7. Phase 3 — Correlation and reachability
 
+**Status: complete. Exit gate passed** — on a fixture with a known dev/prod split, every test-only and orphaned finding is marked unreached and nothing is falsely reached.
+
 Where the product becomes worth money.
 
 **Deliverables**
@@ -201,7 +203,25 @@ Where the product becomes worth money.
 - Reachability: call-graph analysis from network entry points (I5), emitting `CallFrame[]` paths
 - Control-class inference: our code, upgradeable dependency, or vendor blob
 
-**Exit gate:** on a repo with a known dev/prod split, every test-fixture crypto finding is marked unreached. Zero false "reached" on fixtures.
+**Exit gate: passed.** On `fixtures/sample-repo`: the RC4 and MD5 in `tests/` are unreached, the 3DES in the module nothing imports is unreached, and the MD5 in a helper that is neither exported nor called from an exported function is unreached *inside a file that is itself live* — the case import-only analysis gets wrong. Nothing from a test or orphaned path is reported reached.
+
+**Reachability answers with a `via`, not a boolean.** "A request handler calls this" and "this module is published, so somebody's handler might" justify different urgency, and one bit cannot tell them apart:
+
+| `via` | Meaning |
+|---|---|
+| `OBSERVED` | seen on the wire; not an inference at all |
+| `ENTRY_POINT` | a static path exists from a server, `main`, or framework route |
+| `DEPLOYED_CONFIG` | configuration describing a running deployment |
+| `LIBRARY_SURFACE` | inside a package that declares a public surface, so reachable by consumers outside this tree |
+| `NONE` | analyzed, no path |
+
+`LIBRARY_SURFACE` exists because the alternative is worse in the dangerous direction. Django loads its password hashers from a dotted string in settings and n8n discovers its nodes at runtime; no static import edge exists, and calling that code dead retires real work. It carries an explicit `ASSUMPTION` node saying so.
+
+**Three defects the real repos exposed, each of which had silently collapsed the graph:**
+
+1. NodeNext TypeScript imports `./x.js` and means `./x.ts`. Resolving only the literal specifier made every modern TS service look like it imported nothing.
+2. Workspace package names are bare specifiers, indistinguishable from `express`. Without resolving them a monorepo has no edges at all — n8n reported 983 of 19,747 files reachable.
+3. Python absolute imports (`django.utils.crypto`) and TypeScript path aliases (`@/crypto/signer`) are the norm at scale. Aliases resolve by unique-suffix match, preferring the importing package; an ambiguous match creates no edge, because a wrong edge marks unrelated code reachable.
 
 ---
 

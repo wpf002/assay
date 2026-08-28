@@ -26,6 +26,9 @@ import {
  * blob uses RSA" have different Y values and are therefore different work.
  */
 
+export * from './reachability.js';
+export * from './views.js';
+
 export interface AssembleResult {
   readonly occurrences: readonly Occurrence[];
   readonly assets: readonly CryptoAsset[];
