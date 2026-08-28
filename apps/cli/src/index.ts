@@ -4,6 +4,7 @@ import { DEFAULT_PACK_ID, listPacks, loadPack } from '@assay/policy';
 import { runScan } from './commands/scan.js';
 import { runProbe } from './commands/probe.js';
 import { keygen, sign, verify } from './commands/scope.js';
+import { runPush } from './commands/push.js';
 
 const program = new Command('assay').description(
   'Cryptographic bill of materials - discovery, inventory, migration ranking',
@@ -42,6 +43,19 @@ program
   .option('--now <iso>', 'override the current time, for reproducible runs')
   .action(async (targets: string[], options) => {
     await runProbe(targets, options);
+  });
+
+program
+  .command('push <path>')
+  .description('scan a repo and ship the evidence to the API (the server ranks on read)')
+  .option('--api <url>', 'API base URL', process.env['ASSAY_API'] ?? 'http://localhost:3001')
+  .option('--policy <pack>', 'policy pack recorded with the scan', DEFAULT_PACK_ID)
+  .option('--system <id>', 'system identifier (defaults to the directory name)')
+  .option('--include-dev', 'include devDependencies')
+  .option('--key-inventory <file>', 'normalized cloud KMS / HSM key export to fold in')
+  .option('--now <iso>', 'override the current time, for reproducible runs')
+  .action(async (path: string, options) => {
+    await runPush(path, options);
   });
 
 const scope = program

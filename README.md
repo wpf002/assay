@@ -117,7 +117,8 @@ packages/
   detect-kms/      cloud KMS / HSM key inventory. metadata only, never key material.
   correlate/       joins modalities into Asset -> Occurrence edges, resolves conflicts
 apps/
-  api/             Fastify + Prisma + Postgres
+  api/             Fastify + Prisma + Postgres. Ranks on read; never re-derives confidence.
+  web/             Next.js. Two worklists, live policy switcher, derivation drill-down.
   cli/             primary interface. CI-integrable.
 ```
 
@@ -131,6 +132,26 @@ apps/
 pnpm install
 pnpm typecheck && pnpm test && pnpm build
 ```
+
+Bring up the API and the web surface:
+
+```bash
+cp .env.example .env && docker compose up -d && pnpm db:migrate
+```
+
+```bash
+pnpm dev
+```
+
+Compose binds Postgres to host port **5433**. Many machines already run a local Postgres on 5432, and a shadowed port fails as an authentication error rather than as a conflict.
+
+Scan a repo and push the evidence:
+
+```bash
+pnpm assay push ./path/to/repo --system payments-api
+```
+
+Then open http://localhost:3000. Only evidence is stored; the ranking is computed on read, so switching policy packs re-ranks live and marks every row that moved.
 
 Inspect the deadline policy in force:
 
@@ -170,8 +191,10 @@ Discovery is table stakes and several of these do it competently. The gap Assay 
 
 ## Status
 
-Phases 0 through 3 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
+Phases 0 through 4 complete. The engine is implemented and tested, and `assay scan` runs end to end from a directory to two ranked worklists and a CycloneDX 1.7 document.
 
 Phase 1's exit gate was a kill condition, and it passed: two disjoint hand-verified samples across django, Ghost and n8n scored 96.7% and 100% precision at `CONFIRMED`, and 834k LOC of n8n reduced to eleven work items. Details, including what the run does *not* establish, are in [VALIDATION.md](VALIDATION.md). Phase 2 added the scope gate, certificate inventory with a lifetime-vs-deadline check, TLS/SSH capability enumeration, and cloud key-store classification. Its exit gate — that an out-of-scope probe fails at the type level rather than at runtime — is asserted by a compile-time test that runs under `tsc` in CI.
 
-Phase 3 added reachability with a shipped path, and kept capability and deployment as separate answers rather than resolving one into the other. Next is Phase 4, the API and web surface — see [ROADMAP.md](ROADMAP.md).
+Phase 4 added the API, Postgres persistence, scan diff, ticket export, and the web surface: two worklists that are never merged, one derived headline, and a policy pack switcher that re-ranks live and badges every row that moved. Its exit gate — any slack figure to raw evidence in under three clicks — lands in one.
+
+Next is Phase 5, binary analysis — see [ROADMAP.md](ROADMAP.md).

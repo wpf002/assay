@@ -5,7 +5,10 @@ services:
       POSTGRES_USER: assay
       POSTGRES_PASSWORD: assay
       POSTGRES_DB: assay
-    ports: ["5432:5432"]
+    # 5433 on the host: a developer machine very often already has a local
+    # Postgres on 5432, and a shadowed port fails as an authentication error
+    # rather than as a conflict, which is a bad afternoon.
+    ports: ["5433:5432"]
     volumes: ["assay-pg:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U assay"]

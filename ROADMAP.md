@@ -124,7 +124,7 @@ Assay records that a key exists, its algorithm, and its size. It never reads, st
 | 1 | Source + dependency, TS/Python | **the whole bet** — done, gate passed |
 | 2 | Scope gate, KMS, PKI, network | done — adds the independent modalities I1 needs |
 | 3 | Correlation + reachability | done — where it becomes worth money |
-| 4 | API, persistence, web | makes the derivation clickable |
+| 4 | API, persistence, web | done — makes the derivation clickable |
 | 5 | Binary analysis | last on purpose |
 | 6 | Language expansion + CI | breadth after depth |
 | 7 | Vendor attestation | now a FAR compliance artifact, not an upsell |
@@ -227,6 +227,10 @@ Where the product becomes worth money.
 
 ## 8. Phase 4 — API, persistence, web surface
 
+**Status: complete. Exit gate passed** — clicking a slack figure opens the full derivation, ending at `conf/nginx.conf:4` with the literal directive, in **one** click against a budget of three.
+
+**Two decisions carry the phase.** Ranking is computed *on read*, with the policy pack as a query parameter, which is what makes the switcher a live control rather than a re-scan: the evidence does not change when the deadline does, only the arithmetic over it. Confidence is *not* recomputed on read — it is stored verbatim and returned verbatim, because a second implementation is a second chance to disagree with the CLI, and the whole claim is that the same evidence yields the same answer everywhere. A Postgres round-trip test asserts that a CBOM exported from a stored scan is byte-identical to one exported before it was ever written.
+
 **Deliverables**
 
 - Fastify routes: scans, systems, occurrences, CBOM export
@@ -234,9 +238,13 @@ Where the product becomes worth money.
 - Web: two ranked worklists (confidentiality, authenticity), `Factor`-tree drill-down on every number, confidence panel showing what was suppressed, deadline timeline per row against the EO markers, policy pack switcher that re-ranks live with per-row diff badges
 - Exactly one headline number, derived and clickable
 - Jira / ServiceNow export — a worklist that cannot leave the tool does not get worked
-- Railway deploy
+- `assay push` ships evidence to the API; only evidence crosses the wire, never a ranking
 
-**Exit gate:** clicking any slack figure walks the full recursive derivation to raw evidence in under three clicks.
+**Not done, deliberately:** hosting. This is a pre-alpha tool with a kill gate two phases back; putting it behind a URL is not a development step. The Docker Compose file and the Prisma migration are the deployment surface for now.
+
+**Exit gate: passed.** One click from a slack figure to `file:line`. The budget is also enforced in code rather than by eye — `derivationDepth()` measures the tree, and a test fails if a refactor buries evidence a level deeper.
+
+**One environment note worth keeping.** Compose binds Postgres to host port **5433**, not 5432. A developer machine very often already has a local Postgres on 5432, and the resulting shadowed port fails as an *authentication* error rather than as a conflict, which is a bad afternoon.
 
 ---
 

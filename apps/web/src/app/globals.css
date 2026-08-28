@@ -1,0 +1,98 @@
+:root {
+  --bg: #0b0d10;
+  --panel: #12151a;
+  --panel-2: #171b21;
+  --line: #232a33;
+  --text: #e6e9ee;
+  --dim: #8b95a3;
+  --late: #ff6b5e;
+  --ok: #4ec9a4;
+  --warn: #e5b567;
+  --accent: #7aa2f7;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a { color: var(--accent); }
+
+.wrap { max-width: 1500px; margin: 0 auto; padding: 24px; }
+
+header.top {
+  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 20px;
+}
+header.top h1 { font-size: 18px; margin: 0; letter-spacing: 0.02em; }
+header.top .sub { color: var(--dim); font-size: 13px; }
+
+.headline {
+  display: flex; align-items: baseline; gap: 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px 18px; margin-bottom: 20px;
+}
+.headline .big { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.headline .big.late { color: var(--late); }
+.headline .label { color: var(--dim); max-width: 70ch; }
+
+.tracks { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+@media (max-width: 1100px) { .tracks { grid-template-columns: 1fr; } }
+
+.track { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.track > h2 { margin: 0; padding: 12px 16px; font-size: 14px; border-bottom: 1px solid var(--line); }
+.track > h2 small { display: block; color: var(--dim); font-weight: 400; font-size: 12px; margin-top: 2px; }
+
+.row {
+  border-bottom: 1px solid var(--line); padding: 10px 16px; cursor: pointer;
+  display: grid; grid-template-columns: 74px 1fr auto; gap: 12px; align-items: center;
+}
+.row:hover { background: var(--panel-2); }
+.row[aria-expanded='true'] { background: var(--panel-2); }
+.row .slack { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.row .slack.late { color: var(--late); font-weight: 600; }
+.row .name { font-family: var(--mono); font-size: 13px; }
+.row .meta { color: var(--dim); font-size: 12px; margin-top: 2px; }
+
+.chip {
+  display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--dim); margin-right: 6px;
+}
+.chip.confirmed { color: var(--ok); border-color: #24503f; }
+.chip.observed { color: var(--warn); border-color: #4a3a1c; }
+.chip.suspected { color: var(--dim); }
+
+.timeline { width: 190px; height: 22px; display: block; }
+
+.panel { padding: 14px 16px 18px; background: #0f1216; border-bottom: 1px solid var(--line); }
+.panel h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.06em; color: var(--dim); text-transform: uppercase; }
+.panel section { margin-bottom: 16px; }
+
+.tree { font-family: var(--mono); font-size: 12px; }
+.tree .node { padding: 1px 0; }
+.tree .kind {
+  display: inline-block; width: 84px; color: var(--dim); font-size: 10.5px;
+  letter-spacing: 0.05em;
+}
+.tree .kind.ASSUMPTION { color: var(--late); }
+.tree .kind.POLICY { color: var(--warn); }
+.tree .kind.EVIDENCE { color: var(--ok); }
+.tree .val { color: var(--accent); }
+
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+select, input[type='number'] {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px;
+}
+.moved { color: var(--warn); font-size: 11px; font-family: var(--mono); }
+.caveat { color: var(--dim); font-size: 12px; margin-top: 8px; max-width: 100ch; }
+.aside { color: var(--dim); font-size: 12.5px; margin-top: 18px; }
+.empty { padding: 18px 16px; color: var(--dim); }
+table.evidence { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--mono); }
+table.evidence td { padding: 2px 8px 2px 0; vertical-align: top; border-bottom: 1px solid #171b21; }
+table.evidence td.mod { color: var(--dim); white-space: nowrap; }

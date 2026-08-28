@@ -19,7 +19,7 @@ model System {
 }
 
 model CryptoAsset {
-  id                       String       @id // content hash, deterministic
+  id                       String       @id // content hash: same triple, same row, forever
   primitive                String
   parameters               Json
   purpose                  String
@@ -28,37 +28,45 @@ model CryptoAsset {
   nistQuantumSecurityLevel Int?
   oid                      String?
   occurrences              Occurrence[]
+
+  @@index([quantumVulnerable, purpose])
 }
 
 model Occurrence {
-  id               String      @id @default(cuid())
-  asset            CryptoAsset @relation(fields: [assetId], references: [id])
-  assetId          String
-  system           System      @relation(fields: [systemId], references: [id])
-  systemId         String
-  controlClass     String
-  reachable        Boolean?
-  reachEntryPoint  String?
-  reachPath        Json? // CallFrame[], exported into CycloneDX evidence.callstack
-  confidence       Decimal     @db.Decimal(6, 4)
-  confidenceFactor Json // full recursive Factor tree
+  // Content hash of (system, asset, control class). Stable across scans, which
+  // is the only reason a diff is possible without maintaining a mapping table.
+  id           String      @id
+  asset        CryptoAsset @relation(fields: [assetId], references: [id])
+  assetId      String
+  system       System      @relation(fields: [systemId], references: [id])
+  systemId     String
+  controlClass String
+
+  reachable       Boolean?
+  reachVia        String? // OBSERVED | ENTRY_POINT | DEPLOYED_CONFIG | LIBRARY_SURFACE | NONE
+  reachEntryPoint String?
+  reachPath       Json? // CallFrame[], exported into CycloneDX evidence.callstack
+  reachFactor     Json?
+
+  confidence       Decimal @db.Decimal(6, 4)
+  confidenceFactor Json // the full recursive Factor tree; there are no bare numbers
   assertionLevel   String // CONFIRMED | OBSERVED | SUSPECTED
   downgradeReason  String?
 
-  // Ranking is recorded per scan because it is pack-dependent. Re-ranking under
-  // a new pack must be a diff, not a rewrite (I4).
-  urgencyTrack        String? // CONFIDENTIALITY | AUTHENTICITY
-  moscaSlackYears     Decimal? @db.Decimal(6, 2)
-  crqcSlackYears      Decimal? @db.Decimal(6, 2)
+  // Ranking is stored per scan because it is pack-dependent. A re-rank under a
+  // new pack must be a diff, not a rewrite (I4).
+  urgencyTrack         String?
+  moscaSlackYears      Decimal? @db.Decimal(6, 2)
+  crqcSlackYears       Decimal? @db.Decimal(6, 2)
   regulatorySlackYears Decimal? @db.Decimal(6, 2)
-  bindingConstraint   String? // CRQC | REGULATORY
-  policyPackId        String?
-  policyPackVersion   String?
+  bindingConstraint    String?
+  moscaFactor          Json?
 
-  scan     Scan       @relation(fields: [scanId], references: [id])
+  scan     Scan       @relation(fields: [scanId], references: [id], onDelete: Cascade)
   scanId   String
   evidence Evidence[]
 
+  @@unique([scanId, id])
   @@index([systemId, assertionLevel])
   @@index([urgencyTrack, moscaSlackYears])
   @@index([scanId, assetId])
@@ -73,22 +81,29 @@ model Evidence {
   raw              String     @db.Text
   collectedAt      DateTime
   collectorVersion String
+
   // CycloneDX evidence.occurrences shape
-  location         String?
-  line             Int?
-  offset           Int?
-  symbol           String?
+  location String?
+  line     Int?
+  offset   Int?
+  symbol   String?
 
   @@index([occurrenceId])
   @@index([modality])
 }
 
 model Scan {
-  id           String       @id @default(cuid())
-  startedAt    DateTime     @default(now())
-  finishedAt   DateTime?
-  detectors    String[]
-  policyPackId String
-  scopeGrantId String? // required for network detectors
-  occurrences  Occurrence[]
+  id                String       @id @default(cuid())
+  systemName        String
+  startedAt         DateTime     @default(now())
+  finishedAt        DateTime?
+  detectors         String[]
+  policyPackId      String
+  policyPackVersion String
+  // Required for any scan that used a network detector. A probe without one
+  // could not have run (I8); recording it makes that auditable after the fact.
+  scopeGrantId      String?
+  occurrences       Occurrence[]
+
+  @@index([systemName, startedAt])
 }
