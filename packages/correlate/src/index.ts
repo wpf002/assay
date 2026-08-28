@@ -28,6 +28,7 @@ import {
 
 export * from './reachability.js';
 export * from './views.js';
+export * from './traces.js';
 
 export interface AssembleResult {
   readonly occurrences: readonly Occurrence[];

@@ -25,6 +25,7 @@ program
   .option('--include-suspected', 'export SUSPECTED findings as well')
   .option('--key-inventory <file>', 'normalized cloud KMS / HSM key export to fold in')
   .option('--no-binaries', 'skip binary analysis (ELF/Mach-O/PE symbols, constants, embedded DER)')
+  .option('--traces <file>', 'OTLP export or trace bundle: reaches across the network edge')
   .option('--json', 'emit machine-readable worklists on stdout')
   .option('--now <iso>', 'override the current time, for reproducible runs')
   .action(async (path: string, options) => {
@@ -58,6 +59,7 @@ program
   .option('--include-dev', 'include devDependencies')
   .option('--key-inventory <file>', 'normalized cloud KMS / HSM key export to fold in')
   .option('--no-binaries', 'skip binary analysis')
+  .option('--traces <file>', 'OTLP export or trace bundle: reaches across the network edge')
   .option('--now <iso>', 'override the current time, for reproducible runs')
   .action(async (path: string, options) => {
     await runPush(path, options);

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { cipherFromName, sshAlgorithm, tlsCipherSuite, joseAlgorithm, normalizeCurve } from '../src/index.js';
+import {
+  cipherFromName,
+  joseAlgorithm,
+  normalizeCurve,
+  signatureFromName,
+  sshAlgorithm,
+  tlsCipherSuite,
+} from '../src/index.js';
 
 describe('one algorithm, many spellings', () => {
   it('recognizes 3DES however the ecosystem writes it', () => {
@@ -76,5 +83,26 @@ describe('OpenSSL suite names without a key-exchange prefix', () => {
     const specs = tlsCipherSuite('TLS_AES_256_GCM_SHA384');
     expect(specs).toHaveLength(1);
     expect(specs[0]?.primitive).toBe('AES');
+  });
+});
+
+describe('OID long names', () => {
+  it('reads the key algorithm out of a glued certificate signature name', () => {
+    // sha256WithRSAEncryption is what an X.509 signatureAlgorithm field says,
+    // and it is what OpenSSL accepts for one-shot signing.
+    for (const name of ['sha256WithRSAEncryption', 'RSA-SHA256', 'sha256WithRSA']) {
+      const specs = signatureFromName(name);
+      expect(specs.map((s) => s.primitive)).toContain('RSA');
+      expect(specs.map((s) => s.primitive)).toContain('SHA2');
+    }
+  });
+
+  it('reads ECDSA and DSA long forms', () => {
+    expect(signatureFromName('ecdsa-with-SHA384').map((s) => s.primitive)).toContain('ECDSA');
+    expect(signatureFromName('dsaWithSHA1').map((s) => s.primitive)).toContain('DSA');
+  });
+
+  it('does not turn the joining word into a digest', () => {
+    expect(signatureFromName('sha256WithRSAEncryption').filter((s) => s.primitive === 'MD5')).toHaveLength(0);
   });
 });

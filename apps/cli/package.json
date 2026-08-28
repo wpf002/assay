@@ -24,6 +24,7 @@
     "@assay/detect-pki": "workspace:*",
     "@assay/detect-kms": "workspace:*",
     "@assay/detect-binary": "workspace:*",
-    "@assay/attest": "workspace:*"
+    "@assay/attest": "workspace:*",
+    "zod": "^3.23.8"
   }
 }

@@ -114,6 +114,7 @@ export type ReachabilityVia =
   | 'ENTRY_POINT' // a static path exists from a server or main
   | 'DEPLOYED_CONFIG' // configuration that describes a running deployment
   | 'LIBRARY_SURFACE' // inside a published package, so reachable by its consumers
+  | 'TRACE' // another service was observed calling this one in production
   | 'NONE';
 
 export interface Reachability {

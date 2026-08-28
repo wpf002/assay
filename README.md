@@ -66,6 +66,12 @@ Local packs are not forbidden, because forbidding them just makes a dissenting o
 
 RSA in a dev dependency's test fixture and RSA on the payment API key exchange are not the same work item. Occurrences carry a reachability determination, and unreached findings are reported separately rather than padding the count. "Not yet analyzed" is a third state, never collapsed into "not reached."
 
+Static analysis stops at the network edge, and that is the largest false negative there is: a service calling a signing microservice over gRPC looks like it does no signing, and the signing service looks like a library nobody calls. Distributed traces carry reachability across that edge — **positive-only**, because a service nobody exercised on a quiet Tuesday is not dead code:
+
+```bash
+pnpm assay scan ./signing-svc --traces ./otlp-export.json
+```
+
 Competitors claim reachability. Assay ships the **path**, in CycloneDX `evidence.callstack`, where someone who does not trust us can check it — and it says *how* it concluded reachability, because "a request handler calls this" and "this module is published, so somebody's handler might" are different claims: `OBSERVED`, `ENTRY_POINT`, `DEPLOYED_CONFIG`, `LIBRARY_SURFACE`, or `NONE`.
 
 ---

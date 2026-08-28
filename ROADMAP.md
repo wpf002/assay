@@ -128,6 +128,7 @@ Assay records that a key exists, its algorithm, and its size. It never reads, st
 | 5 | Binary analysis | done — last on purpose |
 | 6 | Language expansion + CI | done — breadth after depth |
 | 7 | Vendor attestation | done — now a FAR compliance artifact, not an upsell |
+| 8 | Cross-process reachability | engine done; estate-wide correlation in the API is next |
 
 ---
 
@@ -341,8 +342,26 @@ EO 14412 sec. 5(d) directs CISA to publish CBOM minimum elements ~2026-12-20. Th
 
 ---
 
+## 13a. Phase 8 — Reachability across process boundaries
+
+**Status: engine complete; estate-wide correlation in the API is the remaining piece.**
+
+This was the largest false negative in the tool. A payments API that calls a signing service over gRPC appears to do no signing, and the signing service appears to be a library nobody calls — so the RSA key every payment depends on lands in "unreached" at *both* ends. No amount of parsing fixes it: the edge genuinely does not exist in either codebase.
+
+Distributed traces have it. A parent span in service A with a child span in service B is an observation that A called B, in production, at a known time. `@assay/correlate` ingests OTLP JSON or a normalized bundle, builds the service graph, and propagates reachability outward from services that were called from outside the traced estate.
+
+**One property governs the whole feature: trace evidence is positive-only.** A trace window shows what *did* happen, never what cannot. A service nobody exercised on a quiet Tuesday is not dead code, and using trace absence to mark something unreached would retire real work on the strength of a slow afternoon. So `applyTraceReachability` only ever *raises* a verdict — it promotes a statically-dead finding, leaves an unanalyzed one unanalyzed, never downgrades, and never touches a finding already `OBSERVED` on the wire. Every promoted finding carries the trace window as an explicit `ASSUMPTION`, and the static verdict it overrode is kept inside the derivation rather than discarded.
+
+The cross-service path ships into CycloneDX `evidence.callstack` ahead of the in-process frames: `gateway -> payments => payments -> signing-svc => src/signer.ts`.
+
+**Remaining:** the CLI applies traces to one scan at a time. The form that matters is estate-wide — traces stored alongside scans in the API, correlated across every system at once. That needs a second entity in the store and a migration, and is a phase of its own rather than something to half-build here.
+
+---
+
 ## 14. Open questions
 
-1. **Reachability across process boundaries.** A service calling a signing microservice over gRPC — static call-graph analysis stops at the network edge. Probably needs distributed-trace ingestion. Phase 8 conversation.
-2. **GTM.** This is a CISO budget product with an enterprise sales cycle. Phase 6's CI integration is the only plausible self-serve wedge; the consultancy/MSP channel (which implies multi-tenancy) is the realistic near-term route. Worth deciding which is the entry point.
+1. ~~**Reachability across process boundaries.**~~ Answered in Phase 8 above: distributed-trace ingestion, positive-only. What remains is estate-wide correlation in the API rather than per-scan in the CLI.
+2. **GTM.** This is a CISO budget product with an enterprise sales cycle. Phase 6's CI integration is the only plausible self-serve wedge; the consultancy/MSP channel (which implies multi-tenancy) is the realistic near-term route. Worth deciding which is the entry point. Still open, and not an engineering question.
+
+3. **Assay's own Ed25519 grant signing.** The tool finds it in its own source and it sits in the committed baseline. Migrating `@assay/scope` to ML-DSA is the obvious first use of this project on itself, and would make the scope grant the one signature in the estate that is already post-quantum.
 3. ~~Whether "capability" and "deployment" should be separate asset records.~~ Resolved in §7: separate evidence on one asset.

@@ -233,9 +233,12 @@ const rsaTransport: Rule = {
 const signing: Rule = {
   id: 'ts/node-crypto/sign',
   languages: ['typescript', 'tsx', 'javascript'],
-  methods: ['createSign', 'createVerify'],
+  // `crypto.sign(alg, data, key)` and `crypto.verify` are the modern one-shot
+  // APIs and are what current code actually uses; a rule set that only knows
+  // the streaming createSign/createVerify pair misses them entirely.
+  methods: ['createSign', 'createVerify', 'sign', 'verify'],
   rationale:
-    "createSign('RSA-SHA256') names both the signature primitive and its digest; a bare digest name does not identify the key algorithm and is not reported as one.",
+    "createSign('RSA-SHA256') and sign('RSA-SHA256', ...) both name the signature primitive and its digest. A bare digest name does not identify the key algorithm and is not reported as one - crypto.sign(null, data, key) resolves nothing and emits nothing.",
   detect(call, ctx) {
     if (!boundTo(call, ctx, NODE_CRYPTO) && call.calleeParts[0] !== 'crypto') return [];
     const name = str(call.args[0]);

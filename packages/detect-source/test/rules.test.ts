@@ -262,3 +262,39 @@ hmac.new(key, msg, hashlib.sha256)
     expect(py(`hmac.new(key, msg, hashlib.sha256)`)).toHaveLength(0);
   });
 });
+
+describe('the one-shot signing API', () => {
+  it('resolves crypto.sign with a named algorithm', () => {
+    const d = detect(`
+      import crypto from 'node:crypto';
+      crypto.sign('RSA-SHA256', data, key);
+    `);
+    expect(d.map((x) => x.primitive).sort()).toEqual(['RSA', 'SHA2']);
+    expect(d.find((x) => x.primitive === 'RSA')?.purpose).toBe('DIGITAL_SIGNATURE');
+  });
+
+  it('resolves crypto.verify the same way', () => {
+    const d = detect(`
+      import crypto from 'crypto';
+      crypto.verify('sha256WithRSAEncryption', data, key, sig);
+    `);
+    expect(d.some((x) => x.primitive === 'RSA')).toBe(true);
+  });
+
+  it('emits nothing when the algorithm is null, which is legal and names no key type', () => {
+    const d = detect(`
+      import crypto from 'crypto';
+      crypto.sign(null, data, key);
+    `);
+    expect(d).toHaveLength(0);
+  });
+
+  it('does not collide with a jsonwebtoken sign in the same file', () => {
+    const d = detect(`
+      import jwt from 'jsonwebtoken';
+      jwt.sign(payload, key, { algorithm: 'ES256' });
+    `);
+    // Only the JWT rule fires: `jwt` is not bound to node:crypto.
+    expect(d.every((x) => x.parameters['alg'] === 'ES256' || x.primitive === 'SHA2')).toBe(true);
+  });
+});

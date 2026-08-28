@@ -185,7 +185,11 @@ export function signatureFromName(name: string): readonly AlgoSpec[] {
   const out: AlgoSpec[] = [];
   const hasRsaPss = n.includes('pss');
 
-  for (const p of parts) {
+  for (const raw of parts) {
+    // OID long names glue the algorithm to a suffix: sha256WithRSAEncryption,
+    // ecdsa-with-SHA256, dsaWithSHA1. Strip the suffix before matching, or the
+    // key algorithm in every certificate signature field goes unrecognized.
+    const p = raw.replace(/(encryption|signature)$/, '');
     if (p === 'rsa' || p === 'rsassa') {
       out.push({
         primitive: 'RSA',
@@ -198,7 +202,7 @@ export function signatureFromName(name: string): readonly AlgoSpec[] {
       out.push({ primitive: 'DSA', parameters: {}, purpose: 'DIGITAL_SIGNATURE' });
     } else if (p === 'ed25519' || p === 'ed448') {
       out.push({ primitive: 'EdDSA', parameters: { curve: p === 'ed25519' ? 'Ed25519' : 'Ed448' }, purpose: 'DIGITAL_SIGNATURE' });
-    } else {
+    } else if (p !== '' && p !== 'with' && p !== 'md') {
       const h = hashFromName(p);
       if (h) out.push({ ...h, purpose: 'INTEGRITY' });
     }

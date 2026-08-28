@@ -1,11 +1,12 @@
 import { basename, resolve } from 'node:path';
-import { analyzeReachability, assemble } from '@assay/correlate';
+import { analyzeReachability, applyTraceReachability, assemble } from '@assay/correlate';
 import { scanSource } from '@assay/detect-source';
 import { scanDependencies } from '@assay/detect-deps';
 import { scanCertificates } from '@assay/detect-pki';
 import { importInventory, kmsFindings } from '@assay/detect-kms';
 import { scanBinaries } from '@assay/detect-binary';
 import { loadPack } from '@assay/policy';
+import { loadTraces } from './traces.js';
 import type { Finding } from '@assay/core';
 
 /**
@@ -23,6 +24,8 @@ export interface PushOptions {
   readonly keyInventory?: string;
   /** Binary analysis is on by default; vendor blobs are where the surprises live. */
   readonly binaries?: boolean;
+  /** OTLP export or normalized bundle. Reaches across the network edge. */
+  readonly traces?: string;
   readonly now?: string;
 }
 
@@ -55,6 +58,14 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
 
   const assembled = assemble(findings);
   const reach = analyzeReachability(assembled.occurrences, source.graph);
+  const traces = options.traces === undefined ? null : await loadTraces(options.traces);
+  const occurrences =
+    traces === null
+      ? reach.occurrences
+      : applyTraceReachability(reach.occurrences, {
+          rootSystems: [...traces.roots, ...(reach.entryPoints.length > 0 ? [systemName] : [])],
+          graph: traces.graph,
+        });
 
   const body = {
     systemName,
@@ -70,7 +81,7 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
     scopeGrantId: null,
     startedAt: collectedAt,
     finishedAt: new Date().toISOString(),
-    occurrences: reach.occurrences,
+    occurrences,
     assets: assembled.assets,
   };
 

@@ -10,13 +10,14 @@ import {
   type RankedFinding,
   type Worklists,
 } from '@assay/core';
-import { analyzeReachability, assemble } from '@assay/correlate';
+import { analyzeReachability, applyTraceReachability, assemble } from '@assay/correlate';
 import { scanSource } from '@assay/detect-source';
 import { scanDependencies } from '@assay/detect-deps';
 import { scanCertificates } from '@assay/detect-pki';
 import { importInventory, kmsFindings } from '@assay/detect-kms';
 import { scanBinaries } from '@assay/detect-binary';
 import { decimalYear, loadPack } from '@assay/policy';
+import { loadTraces } from './traces.js';
 
 export interface ScanOptions {
   readonly policy: string;
@@ -32,6 +33,8 @@ export interface ScanOptions {
   readonly keyInventory?: string;
   /** Binary analysis is on by default; vendor blobs are where the surprises live. */
   readonly binaries?: boolean;
+  /** OTLP export or normalized bundle. Reaches across the network edge. */
+  readonly traces?: string;
 }
 
 export async function runScan(path: string, options: ScanOptions): Promise<void> {
@@ -67,7 +70,16 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
   // Presence is not exposure (I5). Reachability runs before ranking so that
   // unreached findings never reach a worklist in the first place.
   const reach = analyzeReachability(assembled.occurrences, source.graph);
-  const occurrences = reach.occurrences;
+  // Static analysis stops at the network edge; traces carry it across. Only
+  // ever upward: a service the traces did not touch keeps its static verdict.
+  const traces = options.traces === undefined ? null : await loadTraces(options.traces);
+  const occurrences =
+    traces === null
+      ? reach.occurrences
+      : applyTraceReachability(reach.occurrences, {
+          rootSystems: [...traces.roots, ...(reach.entryPoints.length > 0 ? [systemId] : [])],
+          graph: traces.graph,
+        });
   const assets = assembled.assets;
 
   const secrecyYears = Number(options.secrecyYears);
@@ -112,6 +124,8 @@ export async function runScan(path: string, options: ScanOptions): Promise<void>
     out: options.out,
     entryPoints: reach.entryPoints,
     reachabilityAnalyzed: reach.analyzed,
+    traceEdges: traces?.graph.edges.length ?? 0,
+    traceRoots: traces?.roots ?? [],
   });
 }
 
@@ -131,6 +145,8 @@ interface ReportInput {
   readonly out: string;
   readonly entryPoints: readonly string[];
   readonly reachabilityAnalyzed: boolean;
+  readonly traceEdges: number;
+  readonly traceRoots: readonly string[];
 }
 
 function report(r: ReportInput): void {
@@ -149,6 +165,12 @@ function report(r: ReportInput): void {
       ` -> ${r.assets.length} asset(s), ${r.occurrences.length} occurrence(s)`,
   );
   line(`  policy ${r.pack}`);
+  if (r.traceEdges > 0) {
+    line(
+      `  traces: ${r.traceEdges} service edge(s), roots ${r.traceRoots.join(', ') || 'none'} ` +
+        '(positive-only: a service absent from the traces is not marked unreached)',
+    );
+  }
   line(
     r.reachabilityAnalyzed
       ? `  reachability from ${r.entryPoints.length} entry point(s): ${r.entryPoints.slice(0, 3).join(', ')}${r.entryPoints.length > 3 ? ', ...' : ''}`
@@ -201,6 +223,7 @@ const VIA_LABEL: Readonly<Record<string, string>> = {
   ENTRY_POINT: 'from entry point',
   DEPLOYED_CONFIG: 'deployed config',
   LIBRARY_SURFACE: 'published surface',
+  TRACE: 'traced from another service',
   UNANALYZED: '',
   NONE: '',
 };

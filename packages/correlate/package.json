@@ -19,6 +19,7 @@
   "dependencies": {
     "@assay/core": "workspace:*",
     "@assay/policy": "workspace:*",
-    "@assay/detect-source": "workspace:*"
+    "@assay/detect-source": "workspace:*",
+    "zod": "^3.23.8"
   }
 }

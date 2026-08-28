@@ -106,6 +106,8 @@ function via(v: string): string {
       return 'deployed config';
     case 'LIBRARY_SURFACE':
       return 'published surface';
+    case 'TRACE':
+      return 'traced from another service';
     default:
       return v.toLowerCase();
   }
