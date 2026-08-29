@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ESTATE_SCAN, Unauthorized, getAttestation, type Attestation } from '@/lib/api';
 
 /**
@@ -12,6 +12,18 @@ import { ESTATE_SCAN, Unauthorized, getAttestation, type Attestation } from '@/l
  *
  * So it leads with the unexamined classes, not the examined ones.
  */
+/**
+ * The remedies and caveats are written once and read in two places: a terminal,
+ * where `assay probe` is already the right thing to print, and this table,
+ * where a literal backtick is just a typo on screen. Rendering them here rather
+ * than keeping two copies of every sentence in the engine.
+ */
+function withCode(text: string): ReactNode[] {
+  return text.split(/`([^`]+)`/g).map((part, i) =>
+    i % 2 === 1 ? <code key={i}>{part}</code> : <span key={i}>{part}</span>,
+  );
+}
+
 export function Coverage({ scanId }: { scanId: string }) {
   const [state, setState] = useState<
     { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; a: Attestation }
@@ -73,7 +85,7 @@ export function Coverage({ scanId }: { scanId: string }) {
             <tr key={c.id} className="miss">
               <th scope="row">{c.label}</th>
               <td className="verdict">Not examined</td>
-              <td className="detail">{c.remedy}</td>
+              <td className="detail">{withCode(c.remedy)}</td>
             </tr>
           ))}
           {seen.map((c) => (
@@ -82,7 +94,7 @@ export function Coverage({ scanId }: { scanId: string }) {
               <td className="verdict ok">
                 {c.occurrences} item{c.occurrences === 1 ? '' : 's'}
               </td>
-              <td className="detail">{c.caveat}</td>
+              <td className="detail">{withCode(c.caveat)}</td>
             </tr>
           ))}
         </tbody>
