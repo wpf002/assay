@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { requestHeaders } from '../http.js';
 
 /**
  * Ship a trace export to the API.
@@ -11,13 +12,16 @@ import { resolve } from 'node:path';
  */
 export interface TracesPushOptions {
   readonly api: string;
+  /** API token. The API has no anonymous access; there is no way to disable that. */
+  readonly token?: string;
 }
 
 export async function runTracesPush(path: string, options: TracesPushOptions): Promise<void> {
+  const headers = requestHeaders(options.api, options.token);
   const payload: unknown = JSON.parse(await readFile(resolve(path), 'utf8'));
   const res = await fetch(`${options.api.replace(/\/$/, '')}/traces`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   });
   if (!res.ok) {

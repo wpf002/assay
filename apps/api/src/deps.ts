@@ -15,9 +15,11 @@ export {
   toCycloneDX,
 } from '@assay/core';
 export type {
+  Factor,
   CryptoAsset,
   ExportProfile,
   Occurrence,
+  Reachability,
   RankedFinding,
   ScanSnapshot,
   Worklists,

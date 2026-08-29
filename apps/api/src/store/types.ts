@@ -218,6 +218,47 @@ export type TraceBundleSummary = Omit<StoredTraceBundle, 'edges'> & {
   readonly edgeCount: number;
 };
 
+export interface StoredToken {
+  readonly id: string;
+  readonly secretHash: string;
+  readonly name: string;
+  readonly role: 'admin' | 'operator' | 'viewer';
+  /** Systems this token may read. Empty means every system. */
+  readonly systems: readonly string[];
+  readonly createdAt: string;
+  readonly createdBy: string;
+  readonly lastUsedAt: string | null;
+  readonly expiresAt: string | null;
+  readonly revokedAt: string | null;
+}
+
+/** A token as it may be shown after creation: never including the secret. */
+export type TokenSummary = Omit<StoredToken, 'secretHash'>;
+
+export interface AuditEvent {
+  readonly id: string;
+  readonly at: string;
+  readonly tokenId: string | null;
+  readonly tokenName: string;
+  readonly role: string;
+  readonly method: string;
+  readonly route: string;
+  readonly resource: string | null;
+  readonly statusCode: number;
+  readonly remoteAddr: string;
+}
+
+/**
+ * "Who exported the CBOM last March" has to be answerable. Newest-N alone made
+ * the trail unqueryable the moment it grew, and left the tokenId index unused.
+ */
+export interface AuditQuery {
+  readonly limit: number;
+  readonly before?: string | undefined;
+  readonly since?: string | undefined;
+  readonly tokenId?: string | undefined;
+}
+
 export interface ScanStore {
   readonly kind: 'memory' | 'prisma';
   put(scan: StoredScan): Promise<void>;
@@ -235,6 +276,22 @@ export interface ScanStore {
    * millions of rows.
    */
   latestSystemNames(): Promise<string[]>;
+
+  /** Lookup is by hash so the database does an indexed read, not a scan. */
+  findToken(secretHash: string): Promise<StoredToken | null>;
+  putToken(token: StoredToken): Promise<void>;
+  listTokens(): Promise<TokenSummary[]>;
+  revokeToken(id: string, at: string): Promise<boolean>;
+  touchToken(id: string, at: string): Promise<void>;
+  /**
+   * Tokens that can still authenticate. Counting revoked and expired ones
+   * meant the bootstrap never re-armed, so losing the last working token
+   * locked the API out permanently with rows still in the table.
+   */
+  countUsableTokens(now: string): Promise<number>;
+
+  appendAudit(event: AuditEvent): Promise<void>;
+  listAudit(query: AuditQuery): Promise<AuditEvent[]>;
 
   putTraces(bundle: StoredTraceBundle): Promise<void>;
   listTraces(): Promise<TraceBundleSummary[]>;

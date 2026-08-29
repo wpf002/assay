@@ -660,3 +660,83 @@ table.evidence td.loc {
   padding: 22px 18px;
   color: var(--text-3);
 }
+
+/* --------------------------------------------------------------- sign in */
+
+.signin {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  max-width: 560px;
+}
+
+.signin input {
+  height: 32px;
+  min-width: 320px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.signin button {
+  height: 32px;
+  padding: 0 16px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.signin button:hover {
+  border-color: #2e3644;
+}
+
+.signin .caveat {
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+
+/* Header title row: the product name and the way back out of a session. */
+.top-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  padding: 6px 12px;
+  border-radius: var(--r-sm);
+  font: 500 12px/1 var(--sans);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.ghost:hover {
+  color: var(--text);
+  border-color: var(--text-3);
+  background: var(--surface-2);
+}
+
+/* A caveat that is a problem rather than a note. */
+.caveat-warn {
+  color: var(--policy);
+  border-left: 2px solid var(--policy);
+  padding-left: 10px;
+}

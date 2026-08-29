@@ -1,5 +1,9 @@
 import {
   summarize,
+  type AuditEvent,
+  type AuditQuery,
+  type StoredToken,
+  type TokenSummary,
   type ScanStore,
   type ScanSummary,
   type StoredScan,
@@ -12,6 +16,8 @@ export class MemoryScanStore implements ScanStore {
   readonly kind = 'memory' as const;
   private readonly scans = new Map<string, StoredScan>();
   private readonly traces = new Map<string, StoredTraceBundle>();
+  private readonly tokens = new Map<string, StoredToken>();
+  private readonly audit: AuditEvent[] = [];
 
   async put(scan: StoredScan): Promise<void> {
     this.scans.set(scan.id, scan);
@@ -48,6 +54,57 @@ export class MemoryScanStore implements ScanStore {
     return [...new Set([...this.scans.values()].map((s) => s.systemName))].sort();
   }
 
+  async findToken(secretHash: string): Promise<StoredToken | null> {
+    for (const t of this.tokens.values()) {
+      if (t.secretHash === secretHash) return t;
+    }
+    return null;
+  }
+
+  async putToken(token: StoredToken): Promise<void> {
+    this.tokens.set(token.id, token);
+  }
+
+  async listTokens(): Promise<TokenSummary[]> {
+    return [...this.tokens.values()]
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map(({ secretHash, ...rest }) => {
+        void secretHash;
+        return rest;
+      });
+  }
+
+  async revokeToken(id: string, at: string): Promise<boolean> {
+    const token = this.tokens.get(id);
+    if (token === undefined || token.revokedAt !== null) return false;
+    this.tokens.set(id, { ...token, revokedAt: at });
+    return true;
+  }
+
+  async touchToken(id: string, at: string): Promise<void> {
+    const token = this.tokens.get(id);
+    if (token !== undefined) this.tokens.set(id, { ...token, lastUsedAt: at });
+  }
+
+  async countUsableTokens(now: string): Promise<number> {
+    return [...this.tokens.values()].filter(
+      (t) => t.revokedAt === null && (t.expiresAt === null || t.expiresAt > now),
+    ).length;
+  }
+
+  async appendAudit(event: AuditEvent): Promise<void> {
+    this.audit.push(event);
+  }
+
+  async listAudit(query: AuditQuery): Promise<AuditEvent[]> {
+    return this.audit
+      .filter((e) => query.tokenId === undefined || e.tokenId === query.tokenId)
+      .filter((e) => query.since === undefined || e.at >= query.since)
+      .filter((e) => query.before === undefined || e.at < query.before)
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, query.limit);
+  }
+
   async putTraces(bundle: StoredTraceBundle): Promise<void> {
     this.traces.set(bundle.id, bundle);
   }
@@ -71,6 +128,8 @@ export class MemoryScanStore implements ScanStore {
   async close(): Promise<void> {
     this.scans.clear();
     this.traces.clear();
+    this.tokens.clear();
+    this.audit.length = 0;
   }
 }
 

@@ -8,6 +8,7 @@ import { scanBinaries } from '@assay/detect-binary';
 import { loadPack } from '@assay/policy';
 import { loadTraces } from './traces.js';
 import { nowOption } from '../options.js';
+import { requestHeaders } from '../http.js';
 import type { Finding } from '@assay/core';
 
 /**
@@ -19,6 +20,8 @@ import type { Finding } from '@assay/core';
  */
 export interface PushOptions {
   readonly api: string;
+  /** API token. The API has no anonymous access; there is no way to disable that. */
+  readonly token?: string;
   readonly policy: string;
   readonly system?: string;
   readonly includeDev?: boolean;
@@ -31,6 +34,10 @@ export interface PushOptions {
 }
 
 export async function runPush(path: string, options: PushOptions): Promise<void> {
+  // Before the scan, not after it. A monorepo scan is minutes of work, and
+  // discovering the missing token only once there is something to send threw
+  // all of it away - reliably, on the first run anyone ever does.
+  const headers = requestHeaders(options.api, options.token);
   const root = resolve(path);
   const systemName = options.system ?? basename(root);
   const pack = loadPack(options.policy);
@@ -88,7 +95,7 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
 
   const res = await fetch(`${options.api.replace(/\/$/, '')}/scans`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
   if (!res.ok) {

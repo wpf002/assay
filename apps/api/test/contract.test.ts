@@ -1,10 +1,9 @@
 import { resolve } from 'node:path';
-import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import type { LightMyRequestResponse } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { scanSource } from '@assay/detect-source';
 import { analyzeReachability, assemble } from '@assay/correlate';
-import { buildApp } from '../src/app.js';
-import { MemoryScanStore } from '../src/store/memory.js';
+import { authedApp, type AuthedApp } from './authed.js';
 
 /**
  * What a caller is owed, independently of which route they came in by.
@@ -47,11 +46,11 @@ async function scanBody(systemName: string, startedAt: string): Promise<IngestBo
 }
 
 const post = (
-  app: FastifyInstance,
+  app: AuthedApp,
   url: string,
   payload: object,
 ): Promise<LightMyRequestResponse> => app.inject({ method: 'POST', url, payload });
-const getJson = async <T>(app: FastifyInstance, url: string): Promise<T> =>
+const getJson = async <T>(app: AuthedApp, url: string): Promise<T> =>
   (await app.inject({ method: 'GET', url })).json<T>();
 
 interface MoscaTerms {
@@ -78,11 +77,11 @@ interface Derivation {
   derivations: { mosca: MoscaTerms | null };
 }
 
-let app: FastifyInstance;
+let app: AuthedApp;
 let scan: string;
 
 beforeAll(async () => {
-  app = await buildApp({ store: new MemoryScanStore() });
+  app = await authedApp();
   const r = await post(app, '/scans', await scanBody('sample', T));
   scan = r.json<{ id: string }>().id;
 }, 120_000);
@@ -93,7 +92,7 @@ afterAll(async () => {
 
 describe('a row reads the same wherever it is read', () => {
   it('drills a row down against the clock the estate ranked it at', async () => {
-    const estate = await buildApp({ store: new MemoryScanStore() });
+    const estate = await authedApp();
     try {
       await post(estate, '/scans', await scanBody('old-sys', '2020-01-01T00:00:00.000Z'));
       await post(estate, '/scans', await scanBody('new-sys', '2030-01-01T00:00:00.000Z'));
@@ -124,7 +123,7 @@ describe('a row reads the same wherever it is read', () => {
     body.occurrences = body.occurrences.map((o, i) =>
       i % 2 === 0 ? o : { ...o, reachability: null },
     );
-    const mixed = await buildApp({ store: new MemoryScanStore() });
+    const mixed = await authedApp();
     try {
       const posted = await post(mixed, '/scans', body);
       const id = posted.json<{ id: string }>().id;
@@ -157,7 +156,7 @@ describe('a row reads the same wherever it is read', () => {
 
 describe('an id names one stored thing', () => {
   it('keeps two scans of one system in the same second apart', async () => {
-    const store = await buildApp({ store: new MemoryScanStore() });
+    const store = await authedApp();
     try {
       const first = await post(store, '/scans', await scanBody('coll', '2027-01-01T00:00:00.111Z'));
       const second = await post(store, '/scans', await scanBody('coll', '2027-01-01T00:00:00.999Z'));
@@ -174,7 +173,7 @@ describe('an id names one stored thing', () => {
   }, 120_000);
 
   it('keeps two trace uploads covering one window apart', async () => {
-    const store = await buildApp({ store: new MemoryScanStore() });
+    const store = await authedApp();
     try {
       const window = {
         from: '2026-08-27T00:00:00.000Z',
@@ -210,7 +209,7 @@ describe('an id names one stored thing', () => {
   });
 
   it('gives an OTLP export with no stated window an id of its own', async () => {
-    const store = await buildApp({ store: new MemoryScanStore() });
+    const store = await authedApp();
     const otlp = (service: string) => ({
       resourceSpans: [
         {
@@ -230,7 +229,7 @@ describe('an id names one stored thing', () => {
   });
 
   it('rejects a diff against a scan of another system rather than reporting full churn', async () => {
-    const store = await buildApp({ store: new MemoryScanStore() });
+    const store = await authedApp();
     try {
       const other = await post(store, '/scans', await scanBody('other', '2026-07-01T00:00:00.000Z'));
       const mine = await post(store, '/scans', await scanBody('mine', '2026-08-01T00:00:00.000Z'));
@@ -333,7 +332,7 @@ describe('flags and precision survive the round trip', () => {
   }, 120_000);
 
   it('reports how many edges a listed bundle has, without the edges', async () => {
-    const store = await buildApp({ store: new MemoryScanStore() });
+    const store = await authedApp();
     try {
       await post(store, '/traces', {
         from: '2026-08-27T00:00:00.000Z',
@@ -353,7 +352,7 @@ describe('flags and precision survive the round trip', () => {
   });
 
   it('bounds the scan list rather than returning every scan ever recorded', async () => {
-    const store = await buildApp({ store: new MemoryScanStore() });
+    const store = await authedApp();
     try {
       await post(store, '/scans', await scanBody('many', '2026-01-01T00:00:00.000Z'));
       await post(store, '/scans', await scanBody('many', '2026-02-01T00:00:00.000Z'));

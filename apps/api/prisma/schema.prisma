@@ -167,3 +167,51 @@ model TraceEdge {
   @@unique([bundleId, fromService, toService])
   @@index([bundleId])
 }
+
+/// An API token.
+///
+/// The secret is never stored. What is stored is a SHA-256 of it, and the
+/// secret is shown exactly once, at creation. An inventory of an
+/// organization's weakest cryptography is one of the most sensitive documents
+/// it owns; a token table that can be read back is a second copy of the key to
+/// it.
+model ApiToken {
+  id        String    @id
+  /// SHA-256 of the secret, hex. Unique so a lookup is a single indexed read
+  /// rather than a scan-and-compare over every row.
+  secretHash String   @unique
+  name      String
+  role      String // admin | operator | viewer
+  /// Systems this token may read. Empty means every system — recorded
+  /// explicitly rather than implied by absence.
+  systems   String[]
+  createdAt DateTime  @default(now())
+  createdBy String
+  lastUsedAt DateTime?
+  expiresAt DateTime?
+  revokedAt DateTime?
+
+  @@index([revokedAt])
+}
+
+/// Who read what.
+///
+/// The customer's own auditor asks this, and "we do not keep that" is not an
+/// answer. Written for reads as well as writes: exfiltrating an inventory is a
+/// read.
+model AuditEvent {
+  id         String   @id @default(cuid())
+  at         DateTime @default(now())
+  tokenId    String?
+  tokenName  String
+  role       String
+  method     String
+  route      String
+  /// The specific thing touched, where the route names one.
+  resource   String?
+  statusCode Int
+  remoteAddr String
+
+  @@index([at])
+  @@index([tokenId, at])
+}

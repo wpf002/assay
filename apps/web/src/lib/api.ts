@@ -154,8 +154,69 @@ export interface RerankResult {
   }[];
 }
 
+const TOKEN_KEY = 'assay.token';
+
+/**
+ * The token lives in this browser and nowhere else.
+ *
+ * The API has no anonymous access, so the dashboard needs a credential. It is
+ * held in localStorage rather than a cookie because there is no session
+ * endpoint to set one, and it is never sent anywhere but the configured API.
+ */
+export function getToken(): string | null {
+  try {
+    return window.localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setToken(token: string): void {
+  try {
+    window.localStorage.setItem(TOKEN_KEY, token.trim());
+  } catch {
+    /* handled by storageAvailable(); see below */
+  }
+}
+
+/**
+ * Whether a token can be kept at all.
+ *
+ * With storage blocked - private mode in some browsers, or a third-party-cookie
+ * policy - setToken silently did nothing and getToken kept returning null, so
+ * the sign-in form accepted a correct token and immediately asked for it again,
+ * forever, with no indication why. Better to say so.
+ */
+export function storageAvailable(): boolean {
+  try {
+    const probe = `${TOKEN_KEY}.probe`;
+    window.localStorage.setItem(probe, '1');
+    window.localStorage.removeItem(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearToken(): void {
+  try {
+    window.localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+export class Unauthorized extends Error {}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`, { cache: 'no-store' });
+  const token = getToken();
+  const res = await fetch(`${API}${path}`, {
+    cache: 'no-store',
+    headers: token === null ? {} : { authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Unauthorized(`${path} -> ${res.status}`);
+  }
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return (await res.json()) as T;
 }

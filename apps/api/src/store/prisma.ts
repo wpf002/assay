@@ -2,6 +2,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { gate, type CallFrame, type CryptoAsset, type Factor, type Occurrence } from '@assay/core';
 import {
   summarize,
+  type AuditEvent,
+  type AuditQuery,
+  type StoredToken,
+  type TokenSummary,
   type ScanStore,
   type ScanSummary,
   type StoredScan,
@@ -193,6 +197,107 @@ export class PrismaScanStore implements ScanStore {
       select: { systemName: true },
     });
     return rows.map((r) => r.systemName);
+  }
+
+  async findToken(secretHash: string): Promise<StoredToken | null> {
+    const row = await this.prisma.apiToken.findUnique({ where: { secretHash } });
+    return row === null ? null : hydrateToken(row);
+  }
+
+  async putToken(token: StoredToken): Promise<void> {
+    await this.prisma.apiToken.create({
+      data: {
+        id: token.id,
+        secretHash: token.secretHash,
+        name: token.name,
+        role: token.role,
+        systems: [...token.systems],
+        createdAt: new Date(token.createdAt),
+        createdBy: token.createdBy,
+        lastUsedAt: token.lastUsedAt === null ? null : new Date(token.lastUsedAt),
+        expiresAt: token.expiresAt === null ? null : new Date(token.expiresAt),
+        revokedAt: token.revokedAt === null ? null : new Date(token.revokedAt),
+      },
+    });
+  }
+
+  async listTokens(): Promise<TokenSummary[]> {
+    const rows = await this.prisma.apiToken.findMany({ orderBy: { createdAt: 'asc' } });
+    // The hash is dropped here rather than at the route, so no caller can
+    // reach it by forgetting to strip it.
+    return rows.map((r) => {
+      const { secretHash, ...rest } = hydrateToken(r);
+      void secretHash;
+      return rest;
+    });
+  }
+
+  async revokeToken(id: string, at: string): Promise<boolean> {
+    const { count } = await this.prisma.apiToken.updateMany({
+      where: { id, revokedAt: null },
+      data: { revokedAt: new Date(at) },
+    });
+    return count > 0;
+  }
+
+  async touchToken(id: string, at: string): Promise<void> {
+    await this.prisma.apiToken.updateMany({ where: { id }, data: { lastUsedAt: new Date(at) } });
+  }
+
+  async countUsableTokens(now: string): Promise<number> {
+    return this.prisma.apiToken.count({
+      where: {
+        revokedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date(now) } }],
+      },
+    });
+  }
+
+  async appendAudit(event: AuditEvent): Promise<void> {
+    await this.prisma.auditEvent.create({
+      data: {
+        id: event.id,
+        at: new Date(event.at),
+        tokenId: event.tokenId,
+        tokenName: event.tokenName,
+        role: event.role,
+        method: event.method,
+        route: event.route,
+        resource: event.resource,
+        statusCode: event.statusCode,
+        remoteAddr: event.remoteAddr,
+      },
+    });
+  }
+
+  async listAudit(query: AuditQuery): Promise<AuditEvent[]> {
+    const rows = await this.prisma.auditEvent.findMany({
+      where: {
+        ...(query.tokenId === undefined ? {} : { tokenId: query.tokenId }),
+        ...(query.since === undefined && query.before === undefined
+          ? {}
+          : {
+              at: {
+                ...(query.since === undefined ? {} : { gte: new Date(query.since) }),
+                ...(query.before === undefined ? {} : { lt: new Date(query.before) }),
+              },
+            }),
+      },
+      orderBy: { at: 'desc' },
+      take: query.limit,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      at: r.at.toISOString(),
+      tokenId: r.tokenId,
+      tokenName: r.tokenName,
+      role: r.role,
+      method: r.method,
+      route: r.route,
+      resource: r.resource,
+      statusCode: r.statusCode,
+      remoteAddr: r.remoteAddr,
+    }));
   }
 
   async putTraces(bundle: StoredTraceBundle): Promise<void> {
@@ -387,6 +492,34 @@ function hydrate(row: NonNullable<ScanRow>): StoredScan {
     scopeGrantId: row.scopeGrantId,
     occurrences: occurrences.sort((a, b) => a.id.localeCompare(b.id)),
     assets: [...assets.values()].sort((a, b) => a.id.localeCompare(b.id)),
+  };
+}
+
+interface TokenRow {
+  id: string;
+  secretHash: string;
+  name: string;
+  role: string;
+  systems: string[];
+  createdAt: Date;
+  createdBy: string;
+  lastUsedAt: Date | null;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+}
+
+function hydrateToken(row: TokenRow): StoredToken {
+  return {
+    id: row.id,
+    secretHash: row.secretHash,
+    name: row.name,
+    role: row.role as StoredToken['role'],
+    systems: row.systems,
+    createdAt: row.createdAt.toISOString(),
+    createdBy: row.createdBy,
+    lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    revokedAt: row.revokedAt?.toISOString() ?? null,
   };
 }
 

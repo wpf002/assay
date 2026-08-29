@@ -55,6 +55,7 @@ program
   .command('push <path>')
   .description('scan a repo and ship the evidence to the API (the server ranks on read)')
   .option('--api <url>', 'API base URL', process.env['ASSAY_API'] ?? 'http://localhost:3001')
+  .option('--token <token>', 'API token (or ASSAY_TOKEN)')
   .option('--policy <pack>', 'policy pack recorded with the scan', DEFAULT_PACK_ID)
   .option('--system <id>', 'system identifier (defaults to the directory name)')
   .option('--include-dev', 'include devDependencies')
@@ -89,7 +90,8 @@ traces
   .command('push <file>')
   .description('upload an OTLP export or trace bundle; only the service graph is kept')
   .option('--api <url>', 'API base URL', process.env['ASSAY_API'] ?? 'http://localhost:3001')
-  .action(async (file: string, options: { api: string }) => {
+  .option('--token <token>', 'API token (or ASSAY_TOKEN)')
+  .action(async (file: string, options: { api: string; token?: string }) => {
     await runTracesPush(file, options);
   });
 

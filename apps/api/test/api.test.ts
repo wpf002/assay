@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { scanSource } from '@assay/detect-source';
 import { analyzeReachability, assemble } from '@assay/correlate';
-import { buildApp } from '../src/app.js';
+import { bootstrapAdminToken, buildApp } from '../src/app.js';
 import { MemoryScanStore } from '../src/store/memory.js';
 
 /**
@@ -20,6 +20,8 @@ const T2 = '2026-09-01T00:00:00.000Z';
 let app: FastifyInstance;
 let scanA: string;
 let scanB: string;
+/** Every route below /health requires a token; there is no way to turn that off. */
+let auth: { authorization: string };
 
 async function scanFixture(startedAt: string): Promise<Record<string, unknown>> {
   const source = await scanSource({ root: FIXTURE, systemId: 'sample', collectedAt: startedAt });
@@ -39,10 +41,12 @@ async function scanFixture(startedAt: string): Promise<Record<string, unknown>> 
 }
 
 beforeAll(async () => {
-  app = await buildApp({ store: new MemoryScanStore() });
-  const a = await app.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T1) });
+  const store = new MemoryScanStore();
+  app = await buildApp({ store });
+  auth = { authorization: `Bearer ${(await bootstrapAdminToken(store)).token}` };
+  const a = await app.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T1), headers: auth });
   scanA = a.json<{ id: string }>().id;
-  const b = await app.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T2) });
+  const b = await app.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T2), headers: auth });
   scanB = b.json<{ id: string }>().id;
 }, 120_000);
 
@@ -55,41 +59,38 @@ describe('ingest', () => {
     // Readable, and unique: the stamp says which scan a human is looking at,
     // the digest keeps two scans of one system in the same second apart.
     expect(scanA).toMatch(/^sample-20260801000000-[0-9a-f]{8}$/);
-    const again = await app.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T1) });
+    const again = await app.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T1), headers: auth });
     expect(again.json<{ id: string }>().id).toBe(scanA);
     expect(scanA).not.toBe(scanB);
   });
 
   it('rejects a malformed scan with the reason', async () => {
-    const r = await app.inject({ method: 'POST', url: '/scans', payload: { systemName: '' } });
+    const r = await app.inject({ method: 'POST', url: '/scans', payload: { systemName: '' }, headers: auth });
     expect(r.statusCode).toBe(400);
     expect(r.json<{ issues: unknown[] }>().issues.length).toBeGreaterThan(0);
   });
 
   it('lists scans newest first', async () => {
-    const r = await app.inject({ method: 'GET', url: '/scans' });
+    const r = await app.inject({ method: 'GET', url: '/scans', headers: auth });
     expect(r.json<{ id: string }[]>().map((s) => s.id)).toEqual([scanB, scanA]);
   });
 });
 
 describe('worklists are ranked on read', () => {
   it('returns two tracks and never pools them', async () => {
-    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}` });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}`, headers: auth });
     const w = r.json<{ confidentiality: { track: string }[]; authenticity: { track: string }[] }>();
     expect(w.confidentiality.every((f) => f.track === 'CONFIDENTIALITY')).toBe(true);
     expect(w.authenticity.every((f) => f.track === 'AUTHENTICITY')).toBe(true);
   });
 
   it('filters to one track on request without merging the other', async () => {
-    const r = await app.inject({
-      method: 'GET',
-      url: `/scans/${scanA}/worklists?track=CONFIDENTIALITY&now=${T1}`,
-    });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?track=CONFIDENTIALITY&now=${T1}`, headers: auth });
     expect(r.json<{ authenticity: unknown[] }>().authenticity).toEqual([]);
   });
 
   it('carries the headline as a ratio with its derivation', async () => {
-    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}` });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}`, headers: auth });
     const h = r.json<{ headline: { numerator: number; denominator: number; factor: unknown } }>().headline;
     expect(h.denominator).toBeGreaterThan(0);
     expect(h.factor).toBeTruthy();
@@ -98,11 +99,8 @@ describe('worklists are ranked on read', () => {
 
 describe('the policy pack switcher is a live control', () => {
   it('changes lateness without changing the finding set', async () => {
-    const eo = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?pack=eo-14412&now=${T1}` });
-    const nist = await app.inject({
-      method: 'GET',
-      url: `/scans/${scanA}/worklists?pack=nist-ir-8547-draft&now=${T1}`,
-    });
+    const eo = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?pack=eo-14412&now=${T1}`, headers: auth });
+    const nist = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?pack=nist-ir-8547-draft&now=${T1}`, headers: auth });
     const a = eo.json<{ confidentiality: unknown[]; authenticity: unknown[] }>();
     const b = nist.json<{ confidentiality: unknown[]; authenticity: unknown[] }>();
     expect(a.confidentiality.length).toBe(b.confidentiality.length);
@@ -110,10 +108,7 @@ describe('the policy pack switcher is a live control', () => {
   });
 
   it('reports exactly which rows moved and why', async () => {
-    const r = await app.inject({
-      method: 'GET',
-      url: `/scans/${scanA}/rerank?from=nist-ir-8547-draft&to=eo-14412&now=${T1}`,
-    });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/rerank?from=nist-ir-8547-draft&to=eo-14412&now=${T1}`, headers: auth });
     const body = r.json<{
       moved: {
         slackYears: { before: number; after: number };
@@ -131,7 +126,7 @@ describe('the policy pack switcher is a live control', () => {
   });
 
   it('exposes pack caveats rather than presenting the figures as truth', async () => {
-    const r = await app.inject({ method: 'GET', url: '/policy-packs' });
+    const r = await app.inject({ method: 'GET', url: '/policy-packs', headers: auth });
     const packs = r.json<{ packId: string; caveats: string[] }[]>();
     expect(packs.find((p) => p.packId === 'eo-14412')?.caveats.length).toBeGreaterThan(0);
   });
@@ -139,12 +134,9 @@ describe('the policy pack switcher is a live control', () => {
 
 describe('the three-click gate', () => {
   it('walks any finding to raw evidence in at most three hops', async () => {
-    const list = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}` });
+    const list = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}`, headers: auth });
     const first = list.json<{ confidentiality: { occurrenceId: string }[] }>().confidentiality[0];
-    const r = await app.inject({
-      method: 'GET',
-      url: `/scans/${scanA}/occurrences/${first?.occurrenceId}?now=${T1}`,
-    });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/occurrences/${first?.occurrenceId}?now=${T1}`, headers: auth });
     const body = r.json<{
       derivations: {
         confidence: { depth: number; citations: number };
@@ -161,45 +153,42 @@ describe('the three-click gate', () => {
   });
 
   it('says why a finding is not CONFIRMED, rather than making the reader infer it', async () => {
-    const list = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}` });
+    const list = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}`, headers: auth });
     const hint = list.json<{ hints: { occurrenceId: string }[] }>().hints[0];
     if (hint === undefined) return;
-    const r = await app.inject({
-      method: 'GET',
-      url: `/scans/${scanA}/occurrences/${hint.occurrenceId}?now=${T1}`,
-    });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/occurrences/${hint.occurrenceId}?now=${T1}`, headers: auth });
     const body = r.json<{ assertionLevel: string; downgradeReason: string | null }>();
     expect(body.assertionLevel).not.toBe('CONFIRMED');
     expect(body.downgradeReason).toBeTruthy();
   });
 
   it('404s an unknown occurrence rather than returning an empty derivation', async () => {
-    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/occurrences/nope` });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/occurrences/nope`, headers: auth });
     expect(r.statusCode).toBe(404);
   });
 });
 
 describe('CBOM export', () => {
   it('is byte-identical to a fresh export of the same scan', async () => {
-    const a = await app.inject({ method: 'GET', url: `/scans/${scanA}/cbom` });
-    const b = await app.inject({ method: 'GET', url: `/scans/${scanA}/cbom` });
+    const a = await app.inject({ method: 'GET', url: `/scans/${scanA}/cbom`, headers: auth });
+    const b = await app.inject({ method: 'GET', url: `/scans/${scanA}/cbom`, headers: auth });
     expect(a.body).toBe(b.body);
   });
 
   it('uses the scan timestamp, not the request time', async () => {
-    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/cbom` });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/cbom`, headers: auth });
     expect(r.json<{ metadata: { timestamp: string } }>().metadata.timestamp).toBe(T1);
   });
 
   it('honours the export profile', async () => {
-    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/cbom?profile=cyclonedx-1.6` });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/cbom?profile=cyclonedx-1.6`, headers: auth });
     expect(r.json<{ specVersion: string }>().specVersion).toBe('1.6');
   });
 });
 
 describe('diff', () => {
   it('diffs against the previous scan of the same system by default', async () => {
-    const r = await app.inject({ method: 'GET', url: `/scans/${scanB}/diff` });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanB}/diff`, headers: auth });
     const d = r.json<{ from: { scanId: string }; counts: Record<string, number> }>();
     expect(d.from.scanId).toBe(scanA);
     // Same tree scanned twice: nothing should have moved.
@@ -209,14 +198,14 @@ describe('diff', () => {
   });
 
   it('404s when there is nothing earlier to compare against', async () => {
-    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/diff` });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/diff`, headers: auth });
     expect(r.statusCode).toBe(404);
   });
 });
 
 describe('ticket export', () => {
   it('emits actionable payloads with the derivation attached', async () => {
-    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/export/tickets?now=${T1}&limit=3` });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/export/tickets?now=${T1}&limit=3`, headers: auth });
     const tickets = r.json<{ summary: string; description: string; fields: Record<string, unknown> }[]>();
     expect(tickets.length).toBeGreaterThan(0);
     expect(tickets[0]?.summary).toContain('Migrate');
@@ -225,7 +214,7 @@ describe('ticket export', () => {
   });
 
   it('carries no severity label - slack is the priority and it has a derivation', async () => {
-    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/export/tickets?now=${T1}` });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/export/tickets?now=${T1}`, headers: auth });
     const t = r.json<Record<string, unknown>[]>()[0];
     expect(t).toBeDefined();
     expect(Object.keys(t as object)).not.toContain('priority');
@@ -234,13 +223,13 @@ describe('ticket export', () => {
 
 describe('health and 404s', () => {
   it('reports which store is in use', async () => {
-    const r = await app.inject({ method: 'GET', url: '/health' });
+    const r = await app.inject({ method: 'GET', url: '/health', headers: auth });
     expect(r.json<{ store: string }>().store).toBe('memory');
   });
 
   it('404s an unknown scan on every scan-scoped route', async () => {
     for (const path of ['', '/worklists', '/cbom', '/diff', '/divergences']) {
-      const r = await app.inject({ method: 'GET', url: `/scans/nope${path}` });
+      const r = await app.inject({ method: 'GET', url: `/scans/nope${path}`, headers: auth });
       expect(r.statusCode).toBe(404);
     }
   });
@@ -262,7 +251,7 @@ const TRACES = {
 
 describe('trace ingest keeps the graph and discards the spans', () => {
   it('accepts a normalized bundle and says what it kept', async () => {
-    const r = await app.inject({ method: 'POST', url: '/traces', payload: TRACES });
+    const r = await app.inject({ method: 'POST', url: '/traces', payload: TRACES, headers: auth });
     expect(r.statusCode).toBe(201);
     const body = r.json<{ spansIngested: number; spansStored: number; edges: number; note: string }>();
     expect(body.spansIngested).toBe(4);
@@ -282,21 +271,21 @@ describe('trace ingest keeps the graph and discards the spans', () => {
         },
       ],
     };
-    const r = await app.inject({ method: 'POST', url: '/traces', payload: otlp });
+    const r = await app.inject({ method: 'POST', url: '/traces', payload: otlp, headers: auth });
     expect(r.statusCode).toBe(201);
     expect(r.json<{ services: string[] }>().services).toEqual(['edge']);
   });
 
   it('rejects something that is neither', async () => {
-    const r = await app.inject({ method: 'POST', url: '/traces', payload: { nope: true } });
+    const r = await app.inject({ method: 'POST', url: '/traces', payload: { nope: true }, headers: auth });
     expect(r.statusCode).toBe(400);
   });
 
   it('never returns a span from any endpoint', async () => {
-    await app.inject({ method: 'POST', url: '/traces', payload: TRACES });
-    const list = await app.inject({ method: 'GET', url: '/traces' });
+    await app.inject({ method: 'POST', url: '/traces', payload: TRACES, headers: auth });
+    const list = await app.inject({ method: 'GET', url: '/traces', headers: auth });
     const first = list.json<{ id: string }[]>()[0];
-    const one = await app.inject({ method: 'GET', url: `/traces/${first?.id}` });
+    const one = await app.inject({ method: 'GET', url: `/traces/${first?.id}`, headers: auth });
     const s = one.body;
     expect(s).not.toContain('spanId');
     expect(s).not.toContain('parentSpanId');
@@ -306,8 +295,8 @@ describe('trace ingest keeps the graph and discards the spans', () => {
 
 describe('estate-wide worklists', () => {
   it('ranks every system together', async () => {
-    await app.inject({ method: 'POST', url: '/traces', payload: TRACES });
-    const r = await app.inject({ method: 'GET', url: `/estate/worklists?now=${T2}` });
+    await app.inject({ method: 'POST', url: '/traces', payload: TRACES, headers: auth });
+    const r = await app.inject({ method: 'GET', url: `/estate/worklists?now=${T2}`, headers: auth });
     const body = r.json<{
       systems: { systemName: string }[];
       traces: { edges: number } | null;
@@ -321,29 +310,33 @@ describe('estate-wide worklists', () => {
   });
 
   it('uses only the newest scan of each system', async () => {
-    const r = await app.inject({ method: 'GET', url: `/estate/worklists?now=${T2}` });
+    const r = await app.inject({ method: 'GET', url: `/estate/worklists?now=${T2}`, headers: auth });
     expect(r.json<{ systems: { scanId: string }[] }>().systems[0]?.scanId).toBe(scanB);
   });
 
   it('still ranks when there are no traces at all', async () => {
-    const bare = await buildApp({ store: new MemoryScanStore() });
-    await bare.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T1) });
-    const r = await bare.inject({ method: 'GET', url: `/estate/worklists?now=${T1}` });
+    const bareStore = new MemoryScanStore();
+    const bare = await buildApp({ store: bareStore });
+    const bareAuth = { authorization: `Bearer ${(await bootstrapAdminToken(bareStore)).token}` };
+    await bare.inject({ method: 'POST', url: '/scans', payload: await scanFixture(T1), headers: bareAuth });
+    const r = await bare.inject({ method: 'GET', url: `/estate/worklists?now=${T1}`, headers: bareAuth });
     expect(r.json<{ traces: unknown }>().traces).toBeNull();
     await bare.close();
   });
 
   it('404s with no scans rather than returning an empty estate', async () => {
-    const bare = await buildApp({ store: new MemoryScanStore() });
-    expect((await bare.inject({ method: 'GET', url: '/estate/worklists' })).statusCode).toBe(404);
+    const bareStore = new MemoryScanStore();
+    const bare = await buildApp({ store: bareStore });
+    const bareAuth = { authorization: `Bearer ${(await bootstrapAdminToken(bareStore)).token}` };
+    expect((await bare.inject({ method: 'GET', url: '/estate/worklists', headers: bareAuth })).statusCode).toBe(404);
     await bare.close();
   });
 });
 
 describe('coverage: the services that call you and have no CBOM', () => {
   it('names the blind spots', async () => {
-    await app.inject({ method: 'POST', url: '/traces', payload: TRACES });
-    const r = await app.inject({ method: 'GET', url: '/estate/coverage' });
+    await app.inject({ method: 'POST', url: '/traces', payload: TRACES, headers: auth });
+    const r = await app.inject({ method: 'GET', url: '/estate/coverage', headers: auth });
     const body = r.json<{ unscanned: string[]; scanned: string[]; note: string }>();
     // gateway, signing-svc and reporting all appear in traces and none has a scan.
     expect(body.unscanned).toContain('signing-svc');
@@ -353,26 +346,25 @@ describe('coverage: the services that call you and have no CBOM', () => {
   });
 
   it('reports scanned systems that carried no traced traffic without calling them dead', async () => {
-    const r = await app.inject({ method: 'GET', url: '/estate/coverage' });
+    const r = await app.inject({ method: 'GET', url: '/estate/coverage', headers: auth });
     const body = r.json<{ scannedWithoutTraffic: string[] }>();
     expect(Array.isArray(body.scannedWithoutTraffic)).toBe(true);
   });
 
   it('404s when no traces have been ingested', async () => {
-    const bare = await buildApp({ store: new MemoryScanStore() });
-    expect((await bare.inject({ method: 'GET', url: '/estate/coverage' })).statusCode).toBe(404);
+    const bareStore = new MemoryScanStore();
+    const bare = await buildApp({ store: bareStore });
+    const bareAuth = { authorization: `Bearer ${(await bootstrapAdminToken(bareStore)).token}` };
+    expect((await bare.inject({ method: 'GET', url: '/estate/coverage', headers: bareAuth })).statusCode).toBe(404);
     await bare.close();
   });
 });
 
 describe('the drill-down carries structured terms, not label strings', () => {
   it('returns the confidence ceilings as data the UI can put into words', async () => {
-    const list = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}` });
+    const list = await app.inject({ method: 'GET', url: `/scans/${scanA}/worklists?now=${T1}`, headers: auth });
     const first = list.json<{ confidentiality: { occurrenceId: string }[] }>().confidentiality[0];
-    const r = await app.inject({
-      method: 'GET',
-      url: `/scans/${scanA}/occurrences/${first?.occurrenceId}?now=${T1}`,
-    });
+    const r = await app.inject({ method: 'GET', url: `/scans/${scanA}/occurrences/${first?.occurrenceId}?now=${T1}`, headers: auth });
     const c = r.json<{
       derivations: {
         confidence: { value: number; groups: { contributing: string; ceiling: number }[] };
@@ -389,19 +381,16 @@ describe('the drill-down carries structured terms, not label strings', () => {
   });
 
   it('resolves an occurrence estate-wide, where there is no single scan to ask', async () => {
-    const estate = await app.inject({ method: 'GET', url: `/estate/worklists?now=${T2}` });
+    const estate = await app.inject({ method: 'GET', url: `/estate/worklists?now=${T2}`, headers: auth });
     const first = estate.json<{ worklists: { confidentiality: { occurrenceId: string }[] } }>()
       .worklists.confidentiality[0];
-    const r = await app.inject({
-      method: 'GET',
-      url: `/estate/occurrences/${first?.occurrenceId}?pack=eo-14412`,
-    });
+    const r = await app.inject({ method: 'GET', url: `/estate/occurrences/${first?.occurrenceId}?pack=eo-14412`, headers: auth });
     expect(r.statusCode).toBe(200);
     expect(r.json<{ evidence: unknown[] }>().evidence.length).toBeGreaterThan(0);
   });
 
   it('404s an occurrence that is in no current scan', async () => {
-    const r = await app.inject({ method: 'GET', url: '/estate/occurrences/nope' });
+    const r = await app.inject({ method: 'GET', url: '/estate/occurrences/nope', headers: auth });
     expect(r.statusCode).toBe(404);
   });
 });

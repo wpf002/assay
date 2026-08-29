@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -22,15 +22,30 @@ import {
   divergencesOf,
   type CryptoAsset,
   type ExportProfile,
+  type Factor,
   type Occurrence,
+  type Reachability,
   type Worklists,
 } from './deps.js';
+import {
+  AuthError,
+  assertMayWrite,
+  assertUnscoped,
+  assertVisible,
+  authenticate,
+  mintToken,
+  requireRole,
+  visibleTo,
+  type Principal,
+  type Role,
+} from './auth.js';
 import {
   IngestSchema,
   summarize,
   type ScanStore,
   type StoredScan,
   type StoredTraceBundle,
+  type StoredToken,
 } from './store/types.js';
 import type { ServiceGraph, SpanRecord } from './deps.js';
 import { DEFAULT_PACK_ID, decimalYear, listPacks, loadPack } from '@assay/policy';
@@ -54,6 +69,45 @@ import { DEFAULT_PACK_ID, decimalYear, listPacks, loadPack } from '@assay/policy
 export interface AppOptions {
   readonly store: ScanStore;
   readonly logger?: boolean;
+  /** Supplied so token expiry and audit timestamps are testable. */
+  readonly clock?: () => Date;
+}
+
+/**
+ * Mint the first admin token.
+ *
+ * Called at startup when the token table is empty, and by tests. The secret is
+ * returned once and never recoverable; an operator who loses it mints another
+ * and revokes this one.
+ */
+export async function bootstrapAdminToken(
+  store: ScanStore,
+  name = 'bootstrap',
+  now = new Date(),
+): Promise<{ token: string; id: string }> {
+  const minted = mintToken();
+  await store.putToken({
+    id: minted.id,
+    secretHash: minted.secretHash,
+    name,
+    role: 'admin',
+    systems: [],
+    createdAt: now.toISOString(),
+    createdBy: 'bootstrap',
+    lastUsedAt: null,
+    expiresAt: null,
+    revokedAt: null,
+  });
+  return { token: minted.secret, id: minted.id };
+}
+
+/** Routes reachable without a token. Deliberately a closed list. */
+const PUBLIC_ROUTES = new Set(['/health']);
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    principal?: Principal;
+  }
 }
 
 /**
@@ -117,14 +171,164 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
    * can never succeed. The POST routes already answer 400 by hand; this is the
    * same contract for the routes that parse with `.parse`.
    */
+  /**
+   * OUT_OF_SCOPE says nothing about itself.
+   *
+   * The status was changed to 404 so a scoped token could not tell "not yours"
+   * from "not there" - and then the body handed back `reason: "OUT_OF_SCOPE"`,
+   * which is the same oracle one field lower. The reason code is genuinely
+   * useful for every other failure, so it survives everywhere else.
+   */
+  function authBody(e: AuthError): { error: string; reason?: string } {
+    return e.reason === 'OUT_OF_SCOPE'
+      ? { error: e.message }
+      : { error: e.message, reason: e.reason };
+  }
+
   app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof AuthError) {
+      return reply.code(error.statusCode).send(authBody(error));
+    }
     if (error instanceof z.ZodError) {
       return reply.code(400).send({ error: 'invalid query', issues: error.issues });
     }
     return reply.send(error);
   });
 
+  const clock = opts.clock ?? (() => new Date());
+
+  /**
+   * Authentication runs before every handler, and the allow-list is the only
+   * way past it. A route added tomorrow is protected by default rather than
+   * open by default, which is the failure mode this whole phase exists to fix.
+   */
+  app.addHook('onRequest', async (request, reply) => {
+    if (PUBLIC_ROUTES.has(request.url.split('?')[0] ?? '')) return;
+    try {
+      const principal = await authenticate(store, request.headers.authorization, { now: clock() });
+      request.principal = principal;
+      // Fire-and-forget: a slow write here would sit in front of every request,
+      // and last-used is a convenience, not the audit trail.
+      void store.touchToken(principal.tokenId, clock().toISOString()).catch(() => undefined);
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      await reply.code(e.statusCode).send(authBody(e));
+    }
+  });
+
+  /**
+   * Who read what. Written for reads as much as writes - exfiltrating an
+   * inventory is a read, and "we do not keep that" is not an answer to the
+   * customer's auditor.
+   */
+  app.addHook('onResponse', async (request, reply) => {
+    if (PUBLIC_ROUTES.has(request.url.split('?')[0] ?? '')) return;
+    const p = request.principal;
+    await store
+      .appendAudit({
+        // request.id is a per-process counter that restarts at 1, so pairing
+        // it with a timestamp collided across restarts and dropped rows.
+        id: randomUUID(),
+        at: clock().toISOString(),
+        tokenId: p?.tokenId ?? null,
+        tokenName: p?.name ?? '(unauthenticated)',
+        role: p?.role ?? '-',
+        method: request.method,
+        route: request.routeOptions.url ?? request.url,
+        resource: resourceOf(request.params),
+        statusCode: reply.statusCode,
+        remoteAddr: request.ip,
+      })
+      .catch((e: unknown) => {
+        // The audit trail is the thing a customer's own auditor asks for.
+        // Losing a row silently means the answer to "who read this" is quietly
+        // wrong rather than visibly broken.
+        request.log.error({ err: e, route: request.routeOptions.url }, 'audit write failed');
+      });
+  });
+
   app.get('/health', async () => ({ ok: true, store: store.kind }));
+
+  /* ------------------------------------------------------------------ tokens */
+
+  app.post('/tokens', async (request, reply) => {
+    const principal = must(request);
+    requireRole(principal, 'admin');
+    const body = z
+      .object({
+        name: z.string().min(1),
+        role: z.enum(['admin', 'operator', 'viewer']),
+        systems: z.array(z.string()).default([]),
+        // Normalized to the same canonical UTC form the stores use, so that
+        // an offset-bearing timestamp does not compare as a different instant
+        // in memory than it does after a round-trip through Postgres.
+        expiresAt: z
+          .string()
+          .datetime()
+          .transform((v) => new Date(v).toISOString())
+          .nullable()
+          .default(null),
+      })
+      .safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid token request', issues: body.error.issues });
+    }
+
+    const minted = mintToken();
+    const record: StoredToken = {
+      id: minted.id,
+      secretHash: minted.secretHash,
+      name: body.data.name,
+      role: body.data.role as Role,
+      systems: body.data.systems,
+      createdAt: clock().toISOString(),
+      createdBy: principal.name,
+      lastUsedAt: null,
+      expiresAt: body.data.expiresAt,
+      revokedAt: null,
+    };
+    await store.putToken(record);
+
+    // The only time the secret exists outside the caller's memory.
+    return reply.code(201).send({
+      id: record.id,
+      token: minted.secret,
+      name: record.name,
+      role: record.role,
+      systems: record.systems,
+      expiresAt: record.expiresAt,
+      note: 'this secret is shown once and is not recoverable',
+    });
+  });
+
+  app.get('/tokens', async (request) => {
+    requireRole(must(request), 'admin');
+    return store.listTokens();
+  });
+
+  app.delete('/tokens/:id', async (request, reply) => {
+    requireRole(must(request), 'admin');
+    const { id } = request.params as { id: string };
+    const revoked = await store.revokeToken(id, clock().toISOString());
+    return revoked
+      ? reply.code(204).send()
+      : reply.code(404).send({ error: 'no such active token' });
+  });
+
+  app.get('/audit', async (request) => {
+    requireRole(must(request), 'admin');
+    const q = z
+      .object({
+        limit: z.coerce.number().min(1).max(1000).default(100),
+        // `before` pages backwards through the trail; without it the answer to
+        // "who exported this in March" was unreachable past the newest 1000.
+        before: z.string().datetime().optional(),
+        since: z.string().datetime().optional(),
+        tokenId: z.string().optional(),
+      })
+      .parse(request.query);
+    return store.listAudit(q);
+  });
 
   app.get('/policy-packs', async () =>
     listPacks().map((id) => {
@@ -148,11 +352,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   );
 
   app.post('/scans', async (request, reply) => {
+    const principal = must(request);
+    requireRole(principal, 'operator');
     const parsed = IngestSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid scan', issues: parsed.error.issues });
     }
     const body = parsed.data;
+    assertMayWrite(principal, body.systemName);
     const scan: StoredScan = {
       id: scanId(body.systemName, body.startedAt),
       systemName: body.systemName,
@@ -170,18 +377,21 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   app.get('/scans', async (request) => {
+    const principal = must(request);
     const q = z
       .object({
         system: z.string().optional(),
         limit: z.coerce.number().min(1).max(500).default(100),
       })
       .parse(request.query);
-    return store.list(q.system, q.limit);
+    const scans = await store.list(q.system, q.limit);
+    return scans.filter((s) => visibleTo(principal, s.systemName));
   });
 
   app.get('/scans/:id', async (request, reply) => {
     const scan = await store.get((request.params as { id: string }).id);
     if (scan === null) return reply.code(404).send({ error: 'no such scan' });
+    assertVisible(must(request), scan.systemName);
     return { ...summarize(scan), assets: scan.assets, occurrenceIds: scan.occurrences.map((o) => o.id) };
   });
 
@@ -189,6 +399,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   app.get('/scans/:id/worklists', async (request, reply) => {
     const scan = await store.get((request.params as { id: string }).id);
     if (scan === null) return reply.code(404).send({ error: 'no such scan' });
+    assertVisible(must(request), scan.systemName);
     const q = RankQuery.parse(request.query);
     const worklists = rankScan(scan, q);
     if (q.track === undefined) return worklists;
@@ -207,6 +418,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   app.get('/scans/:id/rerank', async (request, reply) => {
     const scan = await store.get((request.params as { id: string }).id);
     if (scan === null) return reply.code(404).send({ error: 'no such scan' });
+    assertVisible(must(request), scan.systemName);
     // Derived from RankQuery rather than redeclared, so the one endpoint whose
     // job is attributing differences to policy cannot be handed an X the rest
     // of the API rejects.
@@ -229,11 +441,12 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     const params = request.params as { id: string; occId: string };
     const scan = await store.get(params.id);
     if (scan === null) return reply.code(404).send({ error: 'no such scan' });
+    assertVisible(must(request), scan.systemName);
     const occurrence = scan.occurrences.find((o) => o.id === params.occId);
     if (occurrence === undefined) return reply.code(404).send({ error: 'no such occurrence' });
 
     const q = RankQuery.parse(request.query);
-    return derivation(occurrence, scan.assets, rankScan(scan, q), q.pack);
+    return derivation(occurrence, scan.assets, rankScan(scan, q), q.pack, must(request));
   });
 
   /**
@@ -253,8 +466,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
    */
   app.get('/estate/occurrences/:occId', async (request, reply) => {
     const { occId } = request.params as { occId: string };
+    const principal = must(request);
     const q = EstateQuery.parse(request.query);
-    const scans = await store.latestPerSystem();
+    const scans = (await store.latestPerSystem()).filter((s) => visibleTo(principal, s.systemName));
     if (scans.length === 0) {
       return reply.code(404).send({ error: 'no such occurrence in the estate' });
     }
@@ -268,12 +482,13 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     if (occurrence === undefined) {
       return reply.code(404).send({ error: 'no such occurrence in the estate' });
     }
-    return derivation(occurrence, estate.assets, estate.worklists, q.pack);
+    return derivation(occurrence, estate.assets, estate.worklists, q.pack, principal);
   });
 
   app.get('/scans/:id/cbom', async (request, reply) => {
     const scan = await store.get((request.params as { id: string }).id);
     if (scan === null) return reply.code(404).send({ error: 'no such scan' });
+    assertVisible(must(request), scan.systemName);
     const q = z
       .object({
         profile: z.enum(['cyclonedx-1.7', 'cyclonedx-1.6', 'cisa-min-elements']).default('cyclonedx-1.7'),
@@ -299,11 +514,15 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     const params = request.params as { id: string };
     const current = await store.get(params.id);
     if (current === null) return reply.code(404).send({ error: 'no such scan' });
+    assertVisible(must(request), current.systemName);
     const q = z.object({ from: z.string().optional() }).parse(request.query);
 
     let previous: StoredScan | null;
     if (q.from !== undefined) {
       previous = await store.get(q.from);
+      // Scope first. "That scan is of a different system" is a true statement
+      // about a scan the caller is not allowed to know exists.
+      if (previous !== null) assertVisible(must(request), previous.systemName);
       // Occurrence ids are content hashes of (system, asset, control class),
       // so two systems share none of them and the diff degenerates into every
       // row appearing and every row disappearing - a changelog of nothing,
@@ -328,6 +547,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   app.get('/scans/:id/divergences', async (request, reply) => {
     const scan = await store.get((request.params as { id: string }).id);
     if (scan === null) return reply.code(404).send({ error: 'no such scan' });
+    assertVisible(must(request), scan.systemName);
     return divergencesOf(scan.occurrences, scan.assets);
   });
 
@@ -338,6 +558,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   app.get('/scans/:id/export/tickets', async (request, reply) => {
     const scan = await store.get((request.params as { id: string }).id);
     if (scan === null) return reply.code(404).send({ error: 'no such scan' });
+    assertVisible(must(request), scan.systemName);
     const q = RankQuery.extend({ limit: z.coerce.number().min(1).max(200).default(25) }).parse(
       request.query,
     );
@@ -380,6 +601,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
    * copy-paste into a quarter-long integration.
    */
   app.post('/traces', async (request, reply) => {
+    const principal = must(request);
+    requireRole(principal, 'operator');
+    assertUnscoped(principal, 'uploading traces');
     const body = request.body;
     let spans: SpanRecord[];
     let from = 'unstated';
@@ -438,9 +662,21 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     });
   });
 
-  app.get('/traces', async () => store.listTraces());
+  // A trace bundle names every service in the estate, including ones a scoped
+  // token cannot otherwise see, so it is not viewer-readable.
+  app.get('/traces', async (request) => {
+    // A bundle is a list of every service in the estate and who calls whom.
+    // Role alone was not enough: a scoped operator could read the whole graph.
+    const principal = must(request);
+    requireRole(principal, 'operator');
+    assertUnscoped(principal, 'the trace inventory');
+    return store.listTraces();
+  });
 
   app.get('/traces/:id', async (request, reply) => {
+    const principal = must(request);
+    requireRole(principal, 'operator');
+    assertUnscoped(principal, 'a trace bundle');
     const bundle = await store.getTraces((request.params as { id: string }).id);
     return bundle === null ? reply.code(404).send({ error: 'no such trace bundle' }) : bundle;
   });
@@ -455,8 +691,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
    * the estate shows the RSA key that every payment depends on.
    */
   app.get('/estate/worklists', async (request, reply) => {
+    const principal = must(request);
     const q = EstateQuery.parse(request.query);
-    const scans = await store.latestPerSystem();
+    const scans = (await store.latestPerSystem()).filter((s) => visibleTo(principal, s.systemName));
     if (scans.length === 0) return reply.code(404).send({ error: 'no scans' });
 
     const bundle = await resolveTraces(store, q.traces);
@@ -480,7 +717,9 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
               source: bundle.source,
               window: { from: bundle.windowFrom, to: bundle.windowTo },
               edges: bundle.edges.length,
-              rootServices: bundle.rootServices,
+              // The root list is drawn from the whole estate, so a scoped
+              // token would otherwise read service names it cannot see.
+              rootServices: bundle.rootServices.filter((name) => visibleTo(principal, name)),
             },
       promotedBySystem: bundle === null ? [] : promotedSystems(estate.merged, estate.occurrences),
       worklists: estate.worklists,
@@ -494,6 +733,12 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
    * the inventory that no amount of scanning your own repositories will close.
    */
   app.get('/estate/coverage', async (request, reply) => {
+    // Derived entirely from a trace bundle, which names every service in the
+    // estate. Gating /traces and leaving this open re-served exactly the data
+    // that gate withholds.
+    const principal = must(request);
+    requireRole(principal, 'operator');
+    assertUnscoped(principal, 'the coverage report');
     const q = z.object({ traces: z.string().default('latest') }).parse(request.query);
     const bundle = await resolveTraces(store, q.traces);
     if (bundle === null) return reply.code(404).send({ error: 'no trace bundle' });
@@ -522,6 +767,27 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   return app;
+}
+
+/**
+ * The principal, which the onRequest hook has already established.
+ *
+ * Reaching a handler without one would mean the hook was bypassed, so this
+ * throws rather than returning a permissive default: a missing principal is a
+ * bug in the wiring, and the safe reading of that bug is "no".
+ */
+function must(request: { principal?: Principal }): Principal {
+  if (request.principal === undefined) {
+    throw new AuthError('MISSING', 'unauthenticated request reached a guarded handler');
+  }
+  return request.principal;
+}
+
+function resourceOf(params: unknown): string | null {
+  if (typeof params !== 'object' || params === null) return null;
+  const p = params as Record<string, unknown>;
+  const id = p['id'] ?? p['occId'] ?? p['bundleId'];
+  return typeof id === 'string' ? id : null;
 }
 
 /* --------------------------------------------------------------- estate utils */
@@ -704,11 +970,65 @@ function rankScan(scan: StoredScan, q: z.infer<typeof RankQuery>): Worklists {
  * rather than computed here because who ranked them, and against which clock
  * and which reachability, is the caller's decision.
  */
+/**
+ * Hide the names of services a scoped token cannot see.
+ *
+ * Trace-derived reachability is built out of service names: the frames are
+ * `payments -> treasury`, the entry point is the first hop, and the evidence
+ * label spells the whole path out. So the drill-down handed a viewer scoped to
+ * one system a partial map of the estate around it - the same names /traces
+ * refuses to serve them.
+ *
+ * The path is trimmed to the part inside scope rather than dropped: knowing
+ * that a call arrives from somewhere is the point of the finding, and the hop
+ * count is kept so the derivation still adds up.
+ */
+function scrub(label: string, hidden: readonly string[]): string {
+  let out = label;
+  for (const name of hidden) out = out.split(name).join('(out of scope)');
+  return out;
+}
+
+function redactFactor(factor: Factor, hidden: readonly string[]): Factor {
+  if (hidden.length === 0) return factor;
+  return {
+    ...factor,
+    label: scrub(factor.label, hidden),
+    sources: factor.sources.map((f) => redactFactor(f, hidden)),
+  };
+}
+
+/**
+ * The reachability a given caller is allowed to read.
+ *
+ * Redaction has to happen before the occurrence is echoed, not only inside the
+ * derivations block: the response repeats the raw occurrence at the top, and
+ * that copy carried the entry point, the frames and the "traced call path
+ * a -> b -> c" evidence label in full.
+ */
+function redactReachability(
+  principal: Principal,
+  reach: Reachability,
+  hidden: readonly string[],
+): Reachability & { hopsOutOfScope: number } {
+  const path = reach.path.filter((f) => frameVisible(principal, f));
+  return {
+    ...reach,
+    entryPoint:
+      reach.entryPoint !== null && !visibleTo(principal, reach.entryPoint) ? null : reach.entryPoint,
+    path,
+    factor: redactFactor(reach.factor, hidden),
+    /** Hops through services this token cannot see: counted, not named. */
+    hopsOutOfScope: reach.path.length - path.length,
+  };
+}
+
 function derivation(
   occurrence: Occurrence,
   assets: readonly CryptoAsset[],
   ranked: Worklists,
   packId: string,
+  principal: Principal,
 ) {
   const asset = assets.find((a) => a.id === occurrence.assetId) ?? null;
   const pack = loadPack(packId);
@@ -723,9 +1043,27 @@ function derivation(
     ...ranked.hints,
   ].find((f) => f.occurrenceId === occurrence.id);
   const g = gate(occurrence);
+  const raw = occurrence.reachability;
+  // Only the names actually present in this derivation, so the substitution
+  // does not have to walk the estate.
+  const hiddenServices =
+    raw === null
+      ? []
+      : [
+          ...new Set(
+            [raw.entryPoint, ...raw.path.flatMap((f) => [f.module, ...f.fullFilename.split(' -> ')])]
+              .filter((n): n is string => typeof n === 'string' && n !== '')
+              .filter((n) => !visibleTo(principal, n)),
+          ),
+        ];
+  const reach = raw === null ? null : redactReachability(principal, raw, hiddenServices);
 
   return {
-    occurrence: { ...occurrence, confidence: Number(occurrence.confidence.value) },
+    occurrence: {
+      ...occurrence,
+      reachability: reach,
+      confidence: Number(occurrence.confidence.value),
+    },
     asset,
     assertionLevel: g.assertionLevel,
     downgradeReason: g.downgradeReason,
@@ -762,16 +1100,26 @@ function derivation(
               },
             },
       reachability:
-        occurrence.reachability === null
+        reach === null
           ? null
           : {
-              tree: explain(occurrence.reachability.factor, 'reachability'),
-              via: occurrence.reachability.via,
-              entryPoint: occurrence.reachability.entryPoint,
-              path: occurrence.reachability.path,
+              tree: explain(reach.factor, 'reachability'),
+              via: reach.via,
+              entryPoint: reach.entryPoint,
+              path: reach.path,
+              hopsOutOfScope: reach.hopsOutOfScope,
             },
     },
   };
+}
+
+/** A trace frame is `from -> to`; both ends must be in scope to be shown. */
+function frameVisible(principal: Principal, frame: { module: string; fullFilename: string }): boolean {
+  if (principal.systems.length === 0) return true;
+  return [frame.module, ...frame.fullFilename.split(' -> ')]
+    .map((n) => n.trim())
+    .filter((n) => n !== '')
+    .every((n) => visibleTo(principal, n));
 }
 
 function toSnapshot(scan: StoredScan) {

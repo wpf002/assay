@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ESTATE_SCAN,
+  Unauthorized,
   getCoverage,
   getEstate,
   getRerank,
@@ -89,10 +90,15 @@ export function Dashboard({
   scans,
   packs,
   initialPack,
+  onSignOut,
+  onTokenRejected,
 }: {
   scans: ScanSummary[];
   packs: PolicyPack[];
   initialPack: string;
+  onSignOut: () => void;
+  /** A token revoked mid-session is a sign-in problem, not an outage. */
+  onTokenRejected: () => void;
 }) {
   // Default to the estate once there is more than one system: a per-scan view
   // of a signing service is exactly the answer that misses the point.
@@ -108,6 +114,7 @@ export function Dashboard({
     traceWindow: string | null;
   } | null>(null);
   const [coverage, setCoverage] = useState<Coverage | null>(null);
+  const [coverageError, setCoverageError] = useState<string | null>(null);
   const [moved, setMoved] = useState<Map<string, { before: number; after: number }>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [comparePack, setComparePack] = useState<string>('');
@@ -124,10 +131,19 @@ export function Dashboard({
     setWorklists(null);
     setEstate(null);
     setCoverage(null);
+    setCoverageError(null);
 
     if (scanId === ESTATE) {
-      Promise.all([getEstate(pack, secrecyYears), getCoverage().catch(() => null)])
-        .then(([e, c]) => {
+      Promise.all([
+        getEstate(pack, secrecyYears),
+        // A failure here is not "there is nothing unscanned" - dropping the
+        // warning silently is the one way this panel can be actively wrong.
+        getCoverage().then(
+          (c) => ({ ok: true as const, c }),
+          (err: unknown) => ({ ok: false as const, err }),
+        ),
+      ])
+        .then(([e, cov]) => {
           if (cancelled) return;
           setWorklists(e.worklists);
           setEstate({
@@ -138,10 +154,24 @@ export function Dashboard({
                 ? null
                 : `${e.traces.window.from.slice(0, 10)} to ${e.traces.window.to.slice(0, 10)} from ${e.traces.source}`,
           });
-          setCoverage(c);
+          if (cov.ok) {
+            setCoverage(cov.c);
+            setCoverageError(null);
+          } else if (cov.err instanceof Unauthorized) {
+            // Coverage needs an unscoped operator; a viewer simply cannot see it.
+            setCoverage(null);
+            setCoverageError('This token cannot see the coverage report.');
+          } else {
+            setCoverage(null);
+            setCoverageError(
+              `Coverage is unavailable (${cov.err instanceof Error ? cov.err.message : String(cov.err)}), so services with no scan at all are not listed below.`,
+            );
+          }
         })
         .catch((err: unknown) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+          if (cancelled) return;
+          if (err instanceof Unauthorized) return onTokenRejected();
+          setError(err instanceof Error ? err.message : String(err));
         });
       return () => {
         cancelled = true;
@@ -153,7 +183,9 @@ export function Dashboard({
         if (!cancelled) setWorklists(w);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (cancelled) return;
+        if (e instanceof Unauthorized) return onTokenRejected();
+        setError(e instanceof Error ? e.message : String(e));
       });
     return () => {
       cancelled = true;
@@ -183,7 +215,12 @@ export function Dashboard({
     return (
       <div className="wrap">
         <header className="top">
-          <h1>Assay</h1>
+          <div className="top-title">
+            <h1>Assay</h1>
+            <button type="button" className="ghost" onClick={onSignOut}>
+              Sign Out
+            </button>
+          </div>
         </header>
         <p className="aside">
           No scans yet. Run <code>pnpm assay scan &lt;path&gt;</code> and POST the result to the API,
@@ -196,7 +233,12 @@ export function Dashboard({
   return (
     <div className="wrap">
       <header className="top">
-        <h1>Assay</h1>
+        <div className="top-title">
+          <h1>Assay</h1>
+          <button type="button" className="ghost" onClick={onSignOut}>
+            Sign Out
+          </button>
+        </div>
 
         <div className="controls">
           <Field label="Scope">
@@ -297,6 +339,7 @@ export function Dashboard({
             </p>
           )}
 
+          {coverageError !== null && <p className="aside">{coverageError}</p>}
           {coverage !== null && coverage.unscanned.length > 0 && (
             <p className="caveat warn">
               <strong>Never scanned:</strong> {coverage.unscanned.join(', ')}. These services take
