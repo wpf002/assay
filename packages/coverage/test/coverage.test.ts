@@ -137,7 +137,7 @@ describe('the summary leads with what was missed', () => {
         ],
       }),
     );
-    expect(r.summary.statement).toContain('2 service(s) or host(s) were observed');
+    expect(r.summary.statement).toContain('2 services or hosts were observed');
     expect(r.blindSpots.map((b) => b.name)).toEqual(['edge-lb', 'hsm-broker']);
   });
 

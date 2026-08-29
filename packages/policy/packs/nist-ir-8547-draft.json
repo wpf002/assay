@@ -1,7 +1,7 @@
 {
   "packId": "nist-ir-8547-draft",
   "packVersion": "0.2.0",
-  "title": "NIST IR 8547 (draft) \u2014 physics horizon only",
+  "title": "NIST IR 8547 (Draft)",
   "note": "Deadline figures are an INPUT, not a truth claim. This pack asserts NO regulatory deadline, so ranking under it reflects the CRQC horizon alone. Compare against eo-14412 to see what the mandate adds.",
   "crqcYear": 2035,
   "deprecateYear": 2030,

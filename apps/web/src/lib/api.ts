@@ -62,6 +62,8 @@ export interface PolicyPack {
   packVersion: string;
   title: string;
   crqcYear: number;
+  /** Y, per control class. Served all along; the type dropped it silently. */
+  migrationYearsByControl: Record<string, number>;
   regulatoryDeadlines: { CONFIDENTIALITY: number | null; AUTHENTICITY: number | null };
   regulatoryAuthority: string | null;
   caveats: string[];
@@ -243,6 +245,19 @@ export const getDerivation = (
     `${scanId === ESTATE_SCAN ? '/estate' : `/scans/${scanId}`}/occurrences/` +
       `${encodeURIComponent(occId)}?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`,
   );
+/**
+ * The ticket export, which nothing in the UI ever reached.
+ *
+ * Goes through `get` rather than a plain link because the route needs the
+ * bearer header, and so a 401 arrives as Unauthorized like every other call.
+ * limit=200 is the route's maximum; the default of 25 would truncate silently.
+ */
+export const getTickets = (scanId: string, pack: string, secrecyYears: number): Promise<unknown[]> =>
+  get(
+    `/scans/${encodeURIComponent(scanId)}/export/tickets` +
+      `?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}&limit=200`,
+  );
+
 export const getEstate = (pack: string, secrecyYears: number): Promise<EstateResult> =>
   get(`/estate/worklists?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`);
 export const getCoverage = (): Promise<Coverage> => get('/estate/coverage');

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ESTATE_SCAN, Unauthorized, getAttestation, type Attestation } from '@/lib/api';
+import { Unauthorized, getAttestation, type Attestation } from '@/lib/api';
 
 /**
  * What Assay did not look at.
@@ -53,7 +53,7 @@ export function Coverage({ scanId }: { scanId: string }) {
     };
   }, [scanId]);
 
-  if (state.status === 'loading') return <p className="aside">Checking coverage…</p>;
+  if (state.status === 'loading') return <p className="aside">Checking coverage.</p>;
   if (state.status === 'error') return <p className="aside">{state.message}</p>;
 
   const { report, signed } = state.a;
@@ -63,11 +63,18 @@ export function Coverage({ scanId }: { scanId: string }) {
   return (
     <section className="coverage">
       <div className="coverage-head">
-        <h2>Coverage</h2>
+        <h2>What We Did Not Look At</h2>
         <span className="coverage-count">
-          {report.summary.classesExamined} of {report.summary.classesTotal} classes examined
+          {missed.length > 0
+            ? `${missed.length} of ${report.summary.classesTotal} classes never examined`
+            : `All ${report.summary.classesTotal} classes examined`}
         </span>
       </div>
+
+      <p className="coverage-sub">
+        Findings only mean something next to what was never examined. These are the classes this
+        scan did not cover, and what each one would take.
+      </p>
 
       <p className="coverage-statement">{report.summary.statement}</p>
 
@@ -101,7 +108,7 @@ export function Coverage({ scanId }: { scanId: string }) {
       </table>
 
       <details className="notes">
-        <summary>What this does not claim</summary>
+        <summary>What This Does Not Claim</summary>
         <ul>
           {report.notAsserted.map((n) => (
             <li key={n}>{n}</li>
@@ -112,19 +119,17 @@ export function Coverage({ scanId }: { scanId: string }) {
       <p className="caveat">
         {signed ? (
           <>
-            Signed. Digest <code>{state.a.digest.slice(0, 16)}…</code> — verify it with{' '}
+            Signed. Digest <code>{state.a.digest.slice(0, 16)}</code>. Verify it with{' '}
             <code>assay coverage verify</code>.
           </>
         ) : (
           <>
-            Unsigned: this server holds no signing key, so this is a screen rather than an artifact.
-            Run <code>assay coverage keygen</code> and set <code>ASSAY_COVERAGE_KEY</code> to make it
-            one.
+            Unsigned. This server holds no signing key, so nobody outside the tool can verify this
+            report. Run <code>assay coverage keygen</code> and set <code>ASSAY_COVERAGE_KEY</code>{' '}
+            to sign it.
           </>
         )}
       </p>
     </section>
   );
 }
-
-export const canAttest = (scanId: string) => scanId !== '' && scanId !== ESTATE_SCAN;

@@ -91,12 +91,121 @@ header.top h1 {
   letter-spacing: -0.01em;
 }
 
+/* The wordmark, the sentence saying what this is, and the scan receipt. */
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.brand h1 {
+  margin: 0;
+}
+
+.top-sub {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.receipt {
+  margin: 2px 0 0;
+  max-width: 100ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+.controls-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.controls-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.controls-note {
+  margin: 0;
+  max-width: 64ch;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
 .controls {
   display: flex;
   gap: 18px;
   align-items: flex-end;
   flex-wrap: wrap;
-  margin-left: auto;
+  margin-left: 0;
+}
+
+/* ----------------------------------------------------------- deadline band */
+
+/*
+ * The two dates the whole ranking turns on. They used to be reachable only by
+ * reading a dropdown option and a caveat at the foot of the page.
+ */
+.band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 40px;
+  padding: 13px 18px;
+  margin-bottom: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--policy);
+  border-radius: var(--r);
+}
+
+.band .band-label {
+  flex-basis: 100%;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.band .band-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.band .band-row .k {
+  color: var(--text-2);
+}
+
+.band .band-row .d {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.band .band-row .r {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.band .band-source {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-3);
+  max-width: 110ch;
 }
 
 .field {
@@ -226,48 +335,169 @@ button:focus-visible {
 
 /* ---------------------------------------------------------------- headline */
 
+/*
+ * A verdict, not a scoreboard. The numeral is inline inside the sentence it
+ * belongs to, because standing alone in its own column it was a number with no
+ * noun and the page opened on something nobody could read.
+ */
 .headline {
-  display: flex;
-  align-items: baseline;
-  gap: 20px;
+  display: block;
   padding: 20px 24px;
   margin-bottom: 24px;
   background: linear-gradient(180deg, var(--surface) 0%, #0e1116 100%);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--overdue);
+  border-left: 3px solid var(--line);
   border-radius: var(--r);
 }
 
-.headline .big {
-  font-size: 46px;
-  font-weight: 620;
-  line-height: 0.95;
-  letter-spacing: -0.03em;
-  min-width: 62px;
-  color: var(--text);
+.headline.late {
+  border-left-color: var(--overdue);
 }
 
-.headline .big.late {
+.headline .big {
+  display: inline;
+  font-size: 34px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  margin-right: 4px;
   color: var(--overdue);
 }
 
-.headline .label {
-  color: var(--text-2);
-  max-width: 82ch;
-  line-height: 1.6;
-}
-
-.headline .label strong {
-  display: block;
-  color: var(--text);
+.headline .verdict {
+  margin: 0;
   font-size: 16.5px;
   font-weight: 600;
   letter-spacing: -0.005em;
-  margin-bottom: 5px;
+  color: var(--text);
+  line-height: 1.4;
+  max-width: 76ch;
 }
 
-.headline .label br {
-  display: none;
+.headline .defines {
+  margin: 8px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 86ch;
+}
+
+.headline .excluded {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-width: 86ch;
+}
+
+/* ------------------------------------------------------- what to do next */
+
+.next {
+  margin-bottom: 24px;
+}
+
+.next h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.next .sub {
+  margin: 5px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-3);
+  max-width: 86ch;
+}
+
+.next .groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.next button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 11px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.next button:hover {
+  background: var(--surface-2);
+}
+
+.next button[aria-pressed='true'] {
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--surface-2);
+}
+
+.next button .n {
+  color: var(--overdue);
+  font-weight: 600;
+  margin-left: 8px;
+}
+
+.next .clause {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+.next .filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.next .filter-note {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+/* --------------------------------------------------------------- tracks head */
+
+.tracks-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 10px;
+}
+
+.tracks-caption {
+  margin: 0;
+  max-width: 86ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.tracks-head .export {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.export-note {
+  font-size: 11.5px;
+  color: var(--text-3);
+  text-align: right;
+  max-width: 40ch;
+}
+
+.ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ------------------------------------------------------------------ tracks */
@@ -302,6 +532,16 @@ button:focus-visible {
   background: var(--surface-2);
 }
 
+.track > h2 .kicker {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+
 .track > h2 .count {
   color: var(--text-3);
   font-weight: 500;
@@ -325,7 +565,7 @@ button:focus-visible {
   padding: 13px 18px;
   cursor: pointer;
   display: grid;
-  grid-template-columns: 72px 1fr 216px;
+  grid-template-columns: 84px 1fr 216px 12px;
   gap: 18px;
   align-items: start;
   transition: background 90ms ease;
@@ -344,18 +584,36 @@ button:focus-visible {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/*
+ * Always says something. It used to be transparent when the row was not late,
+ * so the column read as empty rather than as a verdict of "in time".
+ */
 .row .slack {
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   text-align: right;
-  color: transparent;
+  color: var(--text-3);
   padding-top: 4px;
 }
 
-.row .slack.late {
+.row .slack .chip {
+  display: inline-block;
+}
+
+.row .slack .chip.late {
   color: var(--overdue);
+}
+
+.row .chev {
+  color: var(--text-3);
+  font-size: 11px;
+  padding-top: 3px;
+}
+
+.row:hover .chev {
+  color: var(--text-2);
 }
 
 .row .name {
@@ -423,7 +681,7 @@ button:focus-visible {
 
 @media (max-width: 760px) {
   .row {
-    grid-template-columns: 64px 1fr;
+    grid-template-columns: 84px 1fr 12px;
   }
 
   .row .whenwrap {
@@ -708,7 +966,7 @@ table.evidence td.loc {
 /* Header title row: the product name and the way back out of a session. */
 .top-title {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
 }
@@ -768,6 +1026,14 @@ table.evidence td.loc {
 
 .coverage-count {
   font: 400 12px/1 var(--mono);
+  color: var(--text-3);
+}
+
+.coverage-sub {
+  margin: 8px 0 0;
+  max-width: 78ch;
+  font-size: 12.5px;
+  line-height: 1.6;
   color: var(--text-3);
 }
 

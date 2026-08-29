@@ -143,7 +143,7 @@ describe('the estate attestation', () => {
 
     expect(body.report.blindSpots.map((b) => b.name)).toEqual(['hsm-broker']);
     expect(body.report.blindSpots[0]?.why).toContain('will not close this');
-    expect(body.report.summary.statement).toContain('1 service(s) or host(s) were observed');
+    expect(body.report.summary.statement).toContain('1 service or host was observed');
     await a.close();
   });
 

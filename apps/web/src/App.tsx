@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Dashboard } from '@/components/Dashboard';
+import { Masthead } from '@/components/Masthead';
 import {
   Unauthorized,
   clearToken,
@@ -51,9 +52,9 @@ export function App() {
     return (
       <div className="wrap">
         <header className="top">
-          <h1>Assay</h1>
+          <Masthead />
         </header>
-        <p className="aside">loading…</p>
+        <p className="aside">Loading scans.</p>
       </div>
     );
   }
@@ -62,7 +63,7 @@ export function App() {
     return (
       <div className="wrap">
         <header className="top">
-          <h1>Assay</h1>
+          <Masthead />
         </header>
         <form
           className="signin"
@@ -76,25 +77,25 @@ export function App() {
           }}
         >
           <label className="field">
-            <span className="field-label">API token</span>
+            <span className="field-label">API Token</span>
             <input name="token" type="password" autoComplete="off" placeholder="assay_…" />
           </label>
-          <button type="submit">Open</button>
+          <button type="submit">Sign In</button>
           {state.rejected && (
             <p className="caveat caveat-warn">
-              That token was refused. It may have been revoked, expired, or issued by a different
-              API. Paste a current one.
+              That token was refused. It may be revoked, expired, or issued by a different API.
+              Paste a current one.
             </p>
           )}
           {!storageAvailable() && (
             <p className="caveat caveat-warn">
-              This browser is blocking local storage, so the token cannot be kept and this form will
-              ask again on every load. Allow site data for this origin, or use a normal window.
+              This browser blocks local storage, so the token cannot be kept and this form will ask
+              for it again on every load. Allow site data for this origin, or use a normal window.
             </p>
           )}
           <p className="caveat">
-            The API prints one on first start. It is kept in this browser only and sent to nothing
-            but the API.
+            The API prints a token the first time it starts. It is kept in this browser and sent
+            only to the API.
           </p>
         </form>
       </div>
@@ -105,11 +106,11 @@ export function App() {
     return (
       <div className="wrap">
         <header className="top">
-          <h1>Assay</h1>
+          <Masthead />
         </header>
         <p className="aside">
-          The API is not reachable ({state.message}). Start it with{' '}
-          <code>pnpm --filter @assay/api dev</code>.
+          Cannot reach the API ({state.message}). Start it with{' '}
+          <code>pnpm --filter @assay/api dev</code>, then reload.
         </p>
       </div>
     );

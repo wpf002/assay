@@ -58,18 +58,18 @@ describe('assetLabel', () => {
 
 describe('due', () => {
   it('counts one month in the singular', () => {
-    expect(due(finding({ slackYears: 0.09 }))).toBe('1 month of slack');
-    expect(due(finding({ slackYears: -0.09, late: true }))).toBe('Overdue by 1 month');
+    expect(due(finding({ slackYears: 0.09 }))).toBe('1 month left');
+    expect(due(finding({ slackYears: -0.09, late: true }))).toBe('1 month past due');
   });
 
   it('says less than a month rather than none of it', () => {
-    expect(due(finding({ slackYears: 0.01 }))).toBe('less than a month of slack');
+    expect(due(finding({ slackYears: 0.01 }))).toBe('less than a month left');
   });
 
   it('switches to years at a year', () => {
-    expect(due(finding({ slackYears: 0.96 }))).toBe('12 months of slack');
-    expect(due(finding({ slackYears: 1.04 }))).toBe('1.0 years of slack');
-    expect(due(finding({ slackYears: -2.53, late: true }))).toBe('Overdue by 2.5 years');
+    expect(due(finding({ slackYears: 0.96 }))).toBe('12 months left');
+    expect(due(finding({ slackYears: 1.04 }))).toBe('1.0 years left');
+    expect(due(finding({ slackYears: -2.53, late: true }))).toBe('2.5 years past due');
   });
 });
 

@@ -61,22 +61,26 @@ export const PURPOSE: Readonly<Record<string, string>> = {
   RANDOMNESS: 'Randomness',
 };
 
+/** Who has to make the change. Also the group name on the What To Do Next strip. */
 export const CONTROL: Readonly<Record<string, string>> = {
-  SELF: 'Our code',
-  VENDOR_UPGRADEABLE: 'Vendor library',
-  VENDOR_LOCKED: 'Vendor, no roadmap',
+  SELF: 'Our Code',
+  VENDOR_UPGRADEABLE: 'Vendor Library',
+  VENDOR_LOCKED: 'Vendor, No Roadmap',
   HARDWARE: 'Hardware',
-  PROTOCOL_BILATERAL: 'Both endpoints',
+  PROTOCOL_BILATERAL: 'Both Endpoints',
 };
 
 export const WHERE: Readonly<Record<string, string>> = {
   OBSERVED: 'Seen on the wire',
   ENTRY_POINT: 'In a live code path',
   DEPLOYED_CONFIG: 'In deployed config',
-  LIBRARY_SURFACE: 'In published code',
+  LIBRARY_SURFACE: 'On a public API surface',
   TRACE: 'Called by another service',
-  UNANALYZED: '',
-  NONE: '',
+  // Both of these were the empty string, so the row silently dropped the
+  // fragment and a reader could not tell "nothing reached it" from "nobody
+  // looked". Those are different claims and the second one is ours to own.
+  UNANALYZED: 'Reachability not analyzed',
+  NONE: 'No call site to follow',
 };
 
 /**
@@ -87,29 +91,34 @@ export const WHERE: Readonly<Record<string, string>> = {
  * reports. The control class already encodes who has to act; this just says it
  * in words.
  */
-const ACTIONS: Readonly<Record<string, { short: string; full: string }>> = {
+const ACTIONS: Readonly<Record<string, { short: string; full: string; next: string }>> = {
   SELF: {
-    short: 'Our code — change and ship',
+    short: 'Our code: change and ship',
     full: 'This is our code and our deployment. Change it and ship. Weeks, not years.',
+    next: 'Change it and ship.',
   },
   VENDOR_UPGRADEABLE: {
-    short: 'Vendor library — upgrade when released',
-    full: 'A dependency we can upgrade. Track the vendor for a post-quantum release, then bump it.',
+    short: 'Vendor library: upgrade when released',
+    full: 'A dependency we can upgrade. Watch the vendor for a post-quantum release, then bump the version.',
+    next: 'Watch for a post-quantum release, then upgrade.',
   },
   VENDOR_LOCKED: {
-    short: 'Vendor with no roadmap — a procurement problem',
+    short: 'Vendor with no roadmap: a contract problem',
     full:
-      'The vendor has no post-quantum path. No amount of engineering fixes this — it is a contract conversation, and it is the long pole in the plan.',
+      'The vendor has published no post-quantum path. Engineering cannot fix this. It is a contract conversation, and it takes longer than anything else on this list.',
+    next: 'Engineering cannot fix this. Open the contract conversation.',
   },
   HARDWARE: {
-    short: 'Hardware — bounded by the replacement cycle',
+    short: 'Hardware: bound to the replacement cycle',
     full:
-      'Bounded by how often the hardware is replaced, not by how fast anyone can code. Budget and order ahead of the deadline; you cannot compress this.',
+      'This moves at the speed of the hardware replacement cycle, not the speed of a code change. Budget and order well ahead of the deadline. There is no way to compress it.',
+    next: 'Order it into the next refresh cycle.',
   },
   PROTOCOL_BILATERAL: {
-    short: 'Both endpoints — coordinate with the peer',
+    short: 'Both endpoints: coordinate with the peer',
     full:
-      'Both endpoints must support the replacement before either can use it. Agree the change with the peer first — editing the config alone changes nothing.',
+      'Both endpoints must support the replacement before either can use it. Agree the change with the peer first. Editing our own config alone changes nothing.',
+    next: 'Agree the change with the peer before touching config.',
   },
 };
 
@@ -129,6 +138,11 @@ export function actionDetail(f: RankedFinding): string {
   return ACTIONS[f.controlClass]?.full ?? '';
 }
 
+/** The imperative form, for the What To Do Next strip. Same record, so the two cannot drift. */
+export function actionNext(controlClass: string): string {
+  return ACTIONS[controlClass]?.next ?? '';
+}
+
 /** When it is due, in words, not a signed float. */
 export function due(f: RankedFinding): string {
   const years = Math.abs(f.slackYears);
@@ -139,16 +153,25 @@ export function due(f: RankedFinding): string {
       : months === 0
         ? 'less than a month'
         : `${months} month${months === 1 ? '' : 's'}`;
-  return f.late ? `Overdue by ${rounded}` : `${rounded} of slack`;
+  // The row already carries an Overdue chip, so repeating the word beside it
+  // says it twice. "Of slack" is unglossed Mosca vocabulary on the busiest
+  // column of the page.
+  return f.late ? `${rounded} past due` : `${rounded} left`;
 }
 
-/** Why that date, in one clause. */
-export function driver(f: RankedFinding): string {
+/**
+ * Why that date, in one clause.
+ *
+ * The whole right column is dates, so a bare "Quantum horizon" is a category
+ * sitting where a date should be. The year comes from the active pack; without
+ * it the bare form is still correct, which is what the fallback is for.
+ */
+export function driver(f: RankedFinding, crqcYear?: number): string {
   if (f.bindingConstraint === 'REGULATORY') {
     const year = f.mosca.regulatory?.deadlineYear;
-    return year === undefined ? 'Regulatory deadline' : `Deadline ${Math.floor(year) - 1}-12-31`;
+    return year === undefined ? 'Regulatory deadline' : `Due ${Math.floor(year) - 1}-12-31`;
   }
-  return 'Quantum horizon';
+  return crqcYear === undefined ? 'Quantum horizon' : `Quantum horizon ${crqcYear}`;
 }
 
 export const ASSERTION: Readonly<Record<string, string>> = {
@@ -205,6 +228,20 @@ const WHY_LONG: Readonly<Record<string, string>> = {
 const short = (years: number): string => `${years} year${years === 1 ? '' : 's'}`;
 
 /**
+ * A span of work, in the unit a person would say it in.
+ *
+ * SELF is 0.5 years in both shipped packs, so "takes about 0.5 years" was the
+ * most-rendered sentence in the panel and nobody says that out loud. Only used
+ * for the Y term; slack figures keep the decimal, because there the precision
+ * is the point.
+ */
+export function duration(years: number): string {
+  if (years >= 1) return `${years} year${years === 1 ? '' : 's'}`;
+  const months = Math.round(years * 12);
+  return months === 0 ? 'less than a month' : `${months} month${months === 1 ? '' : 's'}`;
+}
+
+/**
  * The counterfactual, which is not always a positive quantity of time: once
  * X + Y passes the horizon the physics has run out too, and "you would have
  * had -1.66 years" says the opposite of what it means.
@@ -217,14 +254,14 @@ const withoutTheDeadline = (slack: number): string =>
 /** How much you are over or under, without a signed number in the prose. */
 const margin = (slack: number): string =>
   slack < 0
-    ? `leaves you ${Math.abs(slack)} years short — you are already late.`
+    ? `leaves you ${Math.abs(slack)} years short, so you are already late.`
     : `leaves ${slack} years to spare.`;
 
 /** The date, as an argument rather than as arithmetic. */
 export function whyThisDate(m: MoscaTerms): string[] {
   const lines: string[] = [];
   lines.push(
-    `Replacing this takes about ${short(m.y)}: ${WHY_LONG[m.controlClass] ?? 'of who controls it'}.`,
+    `Replacing this takes about ${duration(m.y)}: ${WHY_LONG[m.controlClass] ?? 'of who controls it'}.`,
   );
 
   if (m.bindingConstraint === 'REGULATORY' && m.regulatory !== null) {
@@ -243,15 +280,15 @@ export function whyThisDate(m: MoscaTerms): string[] {
 
   if (m.track === 'CONFIDENTIALITY') {
     lines.push(
-      `Anything encrypted with it today has to stay secret for ${short(m.x)}, and this pack assumes a quantum computer by ${m.policy.crqcYear} — ${m.crqc.horizonYears} years away.`,
+      `Anything encrypted with it today has to stay secret for ${short(m.x)}, and this pack assumes a quantum computer by ${m.policy.crqcYear}, which is ${m.crqc.horizonYears} years away.`,
     );
     lines.push(
-      `${short(m.x)} of secrecy plus ${short(m.y)} of work against a ${m.crqc.horizonYears}-year horizon ` +
+      `${short(m.x)} of secrecy plus ${duration(m.y)} of work against a ${m.crqc.horizonYears}-year horizon ` +
         margin(m.crqc.slackYears),
     );
   } else {
     lines.push(
-      `Signatures are not broken retroactively, so only the work counts: ${short(m.y)} against a ${m.crqc.horizonYears}-year horizon ` +
+      `Signatures are not broken retroactively, so only the work counts: ${duration(m.y)} against a ${m.crqc.horizonYears}-year horizon ` +
         margin(m.crqc.slackYears),
     );
   }
@@ -275,11 +312,11 @@ export function whyWeBelieve(value: number, groups: readonly ConfidenceGroup[]):
     const g = groups[0] as ConfidenceGroup;
     const total = g.tallies.reduce((n, t) => n + t.count, 0);
     lines.push(
-      `${MODALITY[g.contributing] ?? g.contributing} is the strongest thing we have, and that kind of evidence is worth at most ${Math.round(g.ceiling * 100)}%. So: ${pct}%.`,
+      `${MODALITY[g.contributing] ?? g.contributing} is the strongest evidence here, and that kind of evidence is worth at most ${Math.round(g.ceiling * 100)}%. That is where ${pct}% comes from.`,
     );
     if (total > 1) {
       lines.push(
-        `We found it ${total} times. That does not raise the number — repeating one kind of observation is still one observation.`,
+        `We found it ${total} times. That does not raise the number, because repeating one kind of observation is still one observation.`,
       );
     }
     return lines;

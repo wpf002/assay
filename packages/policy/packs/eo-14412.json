@@ -1,7 +1,7 @@
 {
   "packId": "eo-14412",
   "packVersion": "1.0.0",
-  "title": "US Executive Order 14412 (2026-06-22)",
+  "title": "EO 14412",
   "note": "Regulatory deadlines are the binding constraint for federal systems and, via the FAR rule, for covered contractors. They fall 4-5 years ahead of the CRQC horizon in this pack, so ranking on CRQC alone understates urgency. crqcYear remains the physics backstop and is an INPUT, not a truth claim.",
   "crqcYear": 2035,
   "deprecateYear": 2030,

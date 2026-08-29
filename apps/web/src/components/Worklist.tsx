@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getDerivation, type Derivation, type RankedFinding } from '@/lib/api';
 import {
-  ASSERTION,
   MODALITY,
   PURPOSE,
   WHERE,
@@ -25,6 +24,7 @@ import { Tree } from './Tree';
  * file and a line number.
  */
 export function Worklist({
+  kicker,
   title,
   subtitle,
   findings,
@@ -33,7 +33,11 @@ export function Worklist({
   moved,
   secrecyYears,
   showSystem,
+  crqcYear,
+  compareTitle,
 }: {
+  /** Which of the two Mosca tracks this is. The title is what the track holds. */
+  kicker: string;
   title: string;
   subtitle: string;
   findings: RankedFinding[];
@@ -48,17 +52,22 @@ export function Worklist({
    * duplicates of one finding rather than as separate work items.
    */
   showSystem: boolean;
+  /** The active pack's horizon, so a row can print the year rather than the word. */
+  crqcYear: number | null;
+  /** Named on a moved row, because "the other pack" is not a pack anyone can look up. */
+  compareTitle: string | null;
 }) {
   const [open, setOpen] = useState<string | null>(null);
 
   return (
     <div className="track">
       <h2>
-        {title} <span className="count">{findings.length}</span>
+        <span className="kicker">{kicker}</span>
+        {title} <span className="count">{findings.length} items</span>
         <small>{subtitle}</small>
       </h2>
       {findings.length === 0 ? (
-        <div className="empty">Nothing on this track.</div>
+        <div className="empty">No work items on this list.</div>
       ) : (
         findings.map((f) => (
           <Row
@@ -69,6 +78,8 @@ export function Worklist({
             moved={moved.get(f.occurrenceId)}
             secrecyYears={secrecyYears}
             showSystem={showSystem}
+            crqcYear={crqcYear}
+            compareTitle={compareTitle}
             open={open === f.occurrenceId}
             onToggle={() => setOpen(open === f.occurrenceId ? null : f.occurrenceId)}
           />
@@ -85,6 +96,8 @@ function Row({
   moved,
   secrecyYears,
   showSystem,
+  crqcYear,
+  compareTitle,
   open,
   onToggle,
 }: {
@@ -94,13 +107,19 @@ function Row({
   moved: { before: number; after: number } | undefined;
   secrecyYears: number;
   showSystem: boolean;
+  crqcYear: number | null;
+  compareTitle: string | null;
   open: boolean;
   onToggle: () => void;
 }) {
   return (
     <>
       <div className="row" role="button" aria-expanded={open} onClick={onToggle}>
-        <div className={`slack ${f.late ? 'late' : ''}`}>{f.late ? 'Overdue' : ''}</div>
+        {/* Always rendered. The not-late case used to be transparent text, so
+            the column read as empty rather than as a verdict. */}
+        <div className="slack">
+          <span className={`chip ${f.late ? 'late' : ''}`}>{f.late ? 'Overdue' : 'In Time'}</span>
+        </div>
 
         <div>
           <div className="name">
@@ -115,13 +134,13 @@ function Row({
             {WHERE[f.reachedVia] !== undefined && WHERE[f.reachedVia] !== '' && (
               <> · {WHERE[f.reachedVia]}</>
             )}
-            {f.assertionLevel !== 'CONFIRMED' && (
-              <> · {ASSERTION[f.assertionLevel] ?? f.assertionLevel} only</>
-            )}
+            {f.assertionLevel !== 'CONFIRMED' && <> · Observed, not confirmed</>}
             {moved !== undefined && (
               <span className="moved">
                 {' '}
-                · was {moved.before.toFixed(1)}y under the other pack
+                · was {Math.abs(moved.before).toFixed(1)} years{' '}
+                {moved.before < 0 ? 'late' : 'to spare'}
+                {compareTitle === null ? ' under the other pack' : ` under ${compareTitle}`}
               </span>
             )}
           </div>
@@ -130,8 +149,12 @@ function Row({
 
         <div className="whenwrap">
           <div className={`when ${f.late ? 'late' : ''}`}>{due(f)}</div>
-          <div className="driver">{driver(f)}</div>
+          <div className="driver">{driver(f, crqcYear ?? undefined)}</div>
           <Timeline f={f} />
+        </div>
+
+        <div className="chev" aria-hidden="true">
+          {open ? '▾' : '▸'}
         </div>
       </div>
       {open && (
@@ -183,21 +206,21 @@ function Detail({
   }, [load]);
 
   if (error !== null) return <div className="panel">Could not load the evidence: {error}</div>;
-  if (data === null) return <div className="panel">Loading…</div>;
+  if (data === null) return <div className="panel">Loading the evidence.</div>;
 
   const d = data.derivations;
   return (
     <div className="panel">
       {actionDetail(finding) !== '' && (
         <section>
-          <h3>What to do</h3>
+          <h3>What To Do</h3>
           <p className="prose">{actionDetail(finding)}</p>
         </section>
       )}
 
       {d.mosca !== null && (
         <section>
-          <h3>Why this date</h3>
+          <h3>Why This Date</h3>
           {whyThisDate(d.mosca).map((line) => (
             <p className="prose" key={line}>
               {line}
@@ -208,14 +231,14 @@ function Detail({
             {d.mosca.policy.authority === null ? '' : ` · ${d.mosca.policy.authority}`}
           </p>
           <details>
-            <summary>Show the arithmetic</summary>
+            <summary>Show The Arithmetic</summary>
             <Tree node={d.mosca.tree} />
           </details>
         </section>
       )}
 
       <section>
-        <h3>How sure we are</h3>
+        <h3>How Sure We Are</h3>
         {whyWeBelieve(d.confidence.value, d.confidence.groups).map((line) => (
           <p className="prose" key={line}>
             {line}
@@ -223,8 +246,8 @@ function Detail({
         ))}
         {data.downgradeReason !== null && (
           <p className="prose warn">
-            Not confirmed: {data.downgradeReason}
-            {data.blockedBy.length > 0 && ` — ${data.blockedBy.join('; ')}`}
+            Not confirmed: {data.downgradeReason}.
+            {data.blockedBy.length > 0 && ` Blocked by: ${data.blockedBy.join('; ')}.`}
           </p>
         )}
         {d.confidence.groups.length > 0 && (
@@ -236,7 +259,7 @@ function Detail({
                     <td>{MODALITY[t.modality] ?? t.modality}</td>
                     <td className="num">{t.count === 1 ? 'once' : `${t.count} times`}</td>
                     <td className="num">up to {Math.round(t.ceiling * 100)}%</td>
-                    <td>{t.modality === g.contributing ? 'counted' : 'already covered'}</td>
+                    <td>{t.modality === g.contributing ? 'Counted' : 'Already counted'}</td>
                   </tr>
                 )),
               )}
@@ -244,19 +267,21 @@ function Detail({
           </table>
         )}
         <details>
-          <summary>Show the full derivation</summary>
+          <summary>Show The Full Derivation</summary>
           <Tree node={d.confidence.tree} />
         </details>
       </section>
 
       {d.reachability !== null && (
         <section>
-          <h3>Where it runs</h3>
+          <h3>Where It Runs</h3>
           <p className="prose">
             {d.reachability.path.length > 0
               ? 'Traced from an entry point:'
               : (WHERE[d.reachability.via] ?? d.reachability.via) +
-                (d.reachability.entryPoint === null ? '.' : ` — ${d.reachability.entryPoint}.`)}
+                (d.reachability.entryPoint === null
+                  ? '.'
+                  : `. Entry point: ${d.reachability.entryPoint}.`)}
           </p>
           {d.reachability.path.length > 0 && (
             <p className="prose path">
@@ -266,14 +291,14 @@ function Detail({
             </p>
           )}
           <details>
-            <summary>Show the full derivation</summary>
+            <summary>Show The Full Derivation</summary>
             <Tree node={d.reachability.tree} />
           </details>
         </section>
       )}
 
       <section>
-        <h3>Where we found it · {data.evidence.length}</h3>
+        <h3>Where We Found It · {data.evidence.length}</h3>
         <table className="evidence">
           <tbody>
             {data.evidence.slice(0, 40).map((e, i) => (
@@ -286,7 +311,7 @@ function Detail({
         </table>
         {data.evidence.length > 40 && (
           <p className="prose dim">
-            and {data.evidence.length - 40} more places, all of them the same work item.
+            And {data.evidence.length - 40} more places. All of them are the same work item.
           </p>
         )}
       </section>

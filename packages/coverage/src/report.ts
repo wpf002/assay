@@ -182,6 +182,6 @@ function statement(
   const blind =
     blindSpots === 0
       ? ''
-      : ` ${blindSpots} service(s) or host(s) were observed in traffic with no inventory of any kind.`;
+      : ` ${blindSpots} ${blindSpots === 1 ? 'service or host was' : 'services or hosts were'} observed in traffic with no inventory of any kind.`;
   return `Examined ${examined} of ${total} classes of the estate; ${missing}.${blind} This is a statement about what was looked at, not about what exists.`;
 }
