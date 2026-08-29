@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Coverage as CoveragePanel } from '@/components/Coverage';
 import {
   ESTATE_SCAN,
   Unauthorized,
@@ -341,11 +342,13 @@ export function Dashboard({
 
           {coverageError !== null && <p className="aside">{coverageError}</p>}
           {coverage !== null && coverage.unscanned.length > 0 && (
-            <p className="caveat warn">
+            <p className="caveat caveat-warn">
               <strong>Never scanned:</strong> {coverage.unscanned.join(', ')}. These services take
               part in live calls and you have no inventory for them.
             </p>
           )}
+
+          <CoveragePanel scanId={scanId} />
 
           <details className="notes">
             <summary>

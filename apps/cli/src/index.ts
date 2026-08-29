@@ -9,6 +9,7 @@ import { runCi } from './commands/ci.js';
 import { attestReconcile, attestTemplate } from './commands/attest.js';
 import { packKeygen, packSign } from './commands/policy.js';
 import { runTracesPush } from './commands/traces-push.js';
+import { runCoverage, runCoverageKeygen, runCoverageVerify } from './commands/coverage.js';
 
 const program = new Command('assay').description(
   'Cryptographic bill of materials - discovery, inventory, migration ranking',
@@ -93,6 +94,37 @@ traces
   .option('--token <token>', 'API token (or ASSAY_TOKEN)')
   .action(async (file: string, options: { api: string; token?: string }) => {
     await runTracesPush(file, options);
+  });
+
+const coverage = program
+  .command('coverage')
+  .description('what Assay looked at and what it did not: the statement an auditor can be handed');
+
+coverage
+  .command('get [scanId]')
+  .description('fetch the attestation for a scan, or for the whole estate')
+  .option('--api <url>', 'API base URL', process.env['ASSAY_API'] ?? 'http://localhost:3001')
+  .option('--token <token>', 'API token (or ASSAY_TOKEN)')
+  .option('--estate', 'attest the whole estate rather than one scan')
+  .option('--out <file>', 'write the attestation here instead of stdout')
+  .action(async (scanId: string | undefined, options) => {
+    await runCoverage(scanId, options);
+  });
+
+coverage
+  .command('verify <file>')
+  .description('check a signed attestation against a key you already trust')
+  .requiredOption('--key <pem-or-path>', 'the public key you trust, NOT the one in the file')
+  .action(async (file: string, options) => {
+    await runCoverageVerify(file, options);
+  });
+
+coverage
+  .command('keygen')
+  .description('generate the Ed25519 keypair the API signs attestations with')
+  .option('--out <file>', 'write the private key here and the public key alongside it')
+  .action(async (options) => {
+    await runCoverageKeygen(options);
   });
 
 const attest = program

@@ -35,6 +35,9 @@ importers:
       '@assay/correlate':
         specifier: workspace:*
         version: link:../../packages/correlate
+      '@assay/coverage':
+        specifier: workspace:*
+        version: link:../../packages/coverage
       '@assay/policy':
         specifier: workspace:*
         version: link:../../packages/policy
@@ -72,6 +75,9 @@ importers:
       '@assay/correlate':
         specifier: workspace:*
         version: link:../../packages/correlate
+      '@assay/coverage':
+        specifier: workspace:*
+        version: link:../../packages/coverage
       '@assay/detect-binary':
         specifier: workspace:*
         version: link:../../packages/detect-binary
@@ -157,6 +163,15 @@ importers:
       '@assay/policy':
         specifier: workspace:*
         version: link:../policy
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
+  packages/coverage:
+    dependencies:
+      '@assay/core':
+        specifier: workspace:*
+        version: link:../core
       zod:
         specifier: ^3.23.8
         version: 3.25.76

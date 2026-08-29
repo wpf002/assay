@@ -34,3 +34,13 @@ export {
   TraceBundleSchema,
 } from '@assay/correlate';
 export type { ServiceGraph, SpanRecord } from '@assay/correlate';
+
+export {
+  CLASSES,
+  ESTATE_CLASSES,
+  coverageReport,
+  coverageDigest,
+  signCoverage,
+  verifyCoverage,
+} from '@assay/coverage';
+export type { BlindSpot, CoverageReport, EstateClass, SignedCoverage } from '@assay/coverage';

@@ -740,3 +740,104 @@ table.evidence td.loc {
   border-left: 2px solid var(--policy);
   padding-left: 10px;
 }
+
+/*
+ * Coverage. The one panel on this page that reports absence, so it is laid out
+ * to be read top-down as a list of gaps: the misses come first and carry the
+ * only colour, and the examined rows sit under them in plain type.
+ */
+.coverage {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.coverage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.coverage h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.coverage-count {
+  font: 400 12px/1 var(--mono);
+  color: var(--text-3);
+}
+
+.coverage-statement {
+  margin: 10px 0 16px;
+  color: var(--text-2);
+  max-width: 68ch;
+}
+
+.coverage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.coverage-table th,
+.coverage-table td {
+  text-align: left;
+  padding: 9px 12px 9px 0;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: baseline;
+  font-weight: 400;
+}
+
+.coverage-table th {
+  color: var(--text);
+  width: 15rem;
+}
+
+.coverage-table .verdict {
+  width: 8rem;
+  font: 400 12px/1.4 var(--mono);
+  color: var(--policy);
+}
+
+.coverage-table .verdict.ok {
+  color: var(--safe);
+}
+
+.coverage-table .detail {
+  color: var(--text-3);
+}
+
+/*
+ * Remedies and caveats are written to read as clauses in the CLI, where they
+ * follow a dash. In a table cell they stand alone, so they get a capital.
+ */
+.coverage-table .detail::first-letter {
+  text-transform: capitalize;
+}
+
+.coverage-table tr.miss th {
+  color: var(--policy);
+}
+
+.coverage .notes ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-2);
+}
+
+.coverage .notes li {
+  margin-bottom: 6px;
+}
+
+@media (max-width: 720px) {
+  .coverage-table th {
+    width: auto;
+  }
+  .coverage-table .verdict {
+    width: auto;
+  }
+}

@@ -2,7 +2,14 @@ node_modules/
 dist/
 .next/
 .turbo/
+# Test-coverage output, per package.
+#
+# This pattern used to be bare `coverage/`, which also matched
+# packages/coverage - the package that produces coverage attestations. The
+# whole package was invisible to git AND to turbo's cache key, so a source
+# change rebuilt nothing and a commit would have shipped without it.
 coverage/
+!packages/coverage/
 *.tsbuildinfo
 .env
 .env.*

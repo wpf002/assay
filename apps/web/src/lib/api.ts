@@ -246,6 +246,40 @@ export const getDerivation = (
 export const getEstate = (pack: string, secrecyYears: number): Promise<EstateResult> =>
   get(`/estate/worklists?pack=${encodeURIComponent(pack)}&secrecyYears=${secrecyYears}`);
 export const getCoverage = (): Promise<Coverage> => get('/estate/coverage');
+
+/**
+ * The coverage attestation: what was looked at, and what was not.
+ *
+ * Served signed when the API holds a key. The envelope says which, because a
+ * report that quietly comes back unsigned gets filed as though it were not.
+ */
+export interface CoverageClass {
+  id: string;
+  label: string;
+  examined: boolean;
+  occurrences: number;
+  assets: number;
+  systems: string[];
+  remedy: string;
+  caveat: string;
+}
+
+export interface Attestation {
+  signed: boolean;
+  digest: string;
+  reason?: string;
+  report: {
+    subject: { kind: 'SCAN' | 'ESTATE'; id: string; systems: string[] };
+    generatedAt: string;
+    classes: CoverageClass[];
+    blindSpots: { name: string; kind: string; why: string }[];
+    summary: { classesExamined: number; classesTotal: number; statement: string };
+    notAsserted: string[];
+  };
+}
+
+export const getAttestation = (scanId: string): Promise<Attestation> =>
+  get(scanId === ESTATE_SCAN ? '/estate/attestation' : `/scans/${scanId}/coverage`);
 /** Both sides are ranked at the operator's X, or the comparison is not like-for-like. */
 export const getRerank = (
   scanId: string,

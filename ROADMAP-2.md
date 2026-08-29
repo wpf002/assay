@@ -42,7 +42,7 @@ That advantage has a shelf life measured in quarters, which is an argument for m
 
 ---
 
-## 2. Phase 9 — Authentication, this week
+## 2. Phase 9 — Authentication — **done** (`da93264`)
 
 An API that serves an inventory of an organization's weakest cryptography to any caller that can reach the port. It is days of work and the first draft put it behind a multi-month gate.
 
@@ -51,6 +51,10 @@ An API that serves an inventory of an organization's weakest cryptography to any
 - Treat the CBOM as the sensitive artifact it is: at a federal contractor it is very likely CUI, which constrains where it may be stored and processed. **This decides whether a pilot is possible at all** (see D7), so it is not a Phase 13 concern.
 
 Nothing else in this document matters if a pilot cannot be run.
+
+**Outcome.** Shipped with tokens, three roles, per-system scopes, an audit trail and a closed route allow-list. An adversarial review of the first cut confirmed 19 defects, all fixed with mutation-verified regression tests. Two were serious: no write path checked scope at all — twelve scope checks existed and every one was on a GET, so a scoped operator could shadow another system's estate row — and `/estate/coverage` served the whole estate's service inventory to any scoped viewer. `GET /traces` had the same hole, which the review missed and the regression test for it found.
+
+CUI handling is **not** done and remains the open pilot blocker (§11).
 
 ---
 
@@ -70,7 +74,7 @@ Five conversations, structured to falsify rather than to pitch:
 
 ---
 
-## 4. Phase 11 — Coverage, stated and signed
+## 4. Phase 11 — Coverage, stated and signed — **built**
 
 The first draft proposed measuring recall against a hand-built ground truth and killing the project below 80%. Three reviewers dismantled that, correctly:
 
@@ -89,6 +93,15 @@ What the buyer actually asked for is not a recall percentage. It is **a coverage
 - Recall measured only where a real ground truth is cheap: purpose-built corpora with known composition, per rule, in unit tests — not by hand-inventorying 2.1M lines.
 
 **This gate can fire.** If the honest answer is "we saw 15% of your estate and here is the list of what we did not touch", that is a real result, it is publishable, and it tells you whether to build Phase 12 or stop.
+
+**Built.** `@assay/coverage` derives the report from evidence alone; `GET /scans/:id/coverage` and `GET /estate/attestation` serve it; `assay coverage get|verify|keygen` makes it a file someone can hand over; the dashboard shows the gaps above the findings.
+
+Two design choices worth recording, because both are load-bearing:
+
+- **Examined means evidence, not intent.** The detector list says what was invoked. A source scan that ran and found nothing has not examined the appliances, and if the report conflated those two the whole document would be worthless. A test holds the distinction.
+- **The report carries what it does not claim.** Five sentences, in the signed body, naming the inferences a green row does not license — completeness, absence, exposure, deployment, and the boundary of the estate itself. A signed document that permits those readings is worse than no document.
+
+And the gate has now fired once, on this repository: the fixture scan **examines 4 of 10 classes** — application source, deployed configuration, third-party libraries, certificates. Vendor binaries, managed keys, live endpoints, hosts, appliances and SaaS produced no evidence at all. That is the honest number and it is the one the tool prints.
 
 ---
 

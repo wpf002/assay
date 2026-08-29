@@ -20,6 +20,11 @@ import {
   rank,
   toCycloneDX,
   divergencesOf,
+  coverageDigest,
+  coverageReport,
+  signCoverage,
+  type BlindSpot,
+  type CoverageReport,
   type CryptoAsset,
   type ExportProfile,
   type Factor,
@@ -71,6 +76,11 @@ export interface AppOptions {
   readonly logger?: boolean;
   /** Supplied so token expiry and audit timestamps are testable. */
   readonly clock?: () => Date;
+  /**
+   * PKCS#8 Ed25519 private key for signing coverage attestations. Absent means
+   * the reports come back explicitly marked unsigned rather than silently so.
+   */
+  readonly coverageKeyPem?: string;
 }
 
 /**
@@ -766,7 +776,106 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     };
   });
 
+  /**
+   * The coverage attestation: what Assay looked at, and what it did not.
+   *
+   * This is the artifact a buyer signs. Not a recall percentage - there is no
+   * honest denominator for one here - but a per-class statement of which parts
+   * of an estate produced evidence, which produced none, and what it would take
+   * to change that. It is deliberately unflattering: a scan of one repository
+   * examines two classes out of ten and the document says exactly that.
+   *
+   * Signed when the server holds a key, and explicitly marked unsigned when it
+   * does not, because an unsigned report that looks signed is worse than none.
+   */
+  app.get('/scans/:id/coverage', async (request, reply) => {
+    const scan = await store.get((request.params as { id: string }).id);
+    if (scan === null) return reply.code(404).send({ error: 'no such scan' });
+    assertVisible(must(request), scan.systemName);
+
+    return attest(
+      coverageReport({
+        subject: { kind: 'SCAN', id: scan.id, systems: [scan.systemName] },
+        generatedAt: clock().toISOString(),
+        policy: { packId: scan.policyPackId, packVersion: scan.policyPackVersion },
+        detectors: scan.detectors,
+        occurrences: scan.occurrences,
+        assets: scan.assets,
+      }),
+    );
+  });
+
+  app.get('/estate/attestation', async (request, reply) => {
+    const principal = must(request);
+    requireRole(principal, 'operator');
+    // Same reasoning as /estate/coverage: the blind-spot list names every
+    // service in the estate, so a scoped token has no business reading it.
+    assertUnscoped(principal, 'the estate attestation');
+
+    const q = EstateQuery.parse(request.query);
+    const scans = await store.latestPerSystem();
+    if (scans.length === 0) return reply.code(404).send({ error: 'no scans' });
+    const bundle = await resolveTraces(store, q.traces);
+    const merged = rankEstate(scans, bundle, q);
+
+    return attest(
+      coverageReport({
+        subject: {
+          kind: 'ESTATE',
+          id: `estate@${newestStart(scans)}`,
+          systems: scans.map((s) => s.systemName),
+        },
+        generatedAt: clock().toISOString(),
+        policy: { packId: q.pack, packVersion: loadPack(q.pack).packVersion },
+        detectors: [...new Set(scans.flatMap((s) => s.detectors))],
+        occurrences: merged.occurrences,
+        assets: merged.assets,
+        blindSpots: blindSpotsOf(bundle, new Set(scans.map((s) => s.systemName))),
+      }),
+    );
+  });
+
+  /**
+   * Sign if we can, say so if we cannot.
+   *
+   * A report that quietly comes back unsigned is the failure mode here: it gets
+   * filed, and a year later nobody can tell whether the copy on the share drive
+   * is the one the tool produced.
+   */
+  function attest(report: CoverageReport) {
+    const key = opts.coverageKeyPem;
+    if (key === undefined) {
+      return {
+        signed: false as const,
+        reason:
+          'this server holds no coverage signing key; set ASSAY_COVERAGE_KEY to a PKCS#8 Ed25519 private key to produce a signed attestation',
+        digest: coverageDigest(report),
+        report,
+      };
+    }
+    return { signed: true as const, ...signCoverage(report, key) };
+  }
+
   return app;
+}
+
+/** Every service the traces saw that has no inventory of any kind. */
+function blindSpotsOf(bundle: StoredTraceBundle | null, scanned: ReadonlySet<string>): BlindSpot[] {
+  if (bundle === null) return [];
+  const services = new Set<string>(bundle.rootServices);
+  for (const e of bundle.edges) {
+    services.add(e.from);
+    services.add(e.to);
+  }
+  return [...services]
+    .filter((name) => !scanned.has(name))
+    .sort()
+    .map((name) => ({
+      name,
+      kind: 'SERVICE' as const,
+      observedBy: bundle.source === '' ? 'traces' : bundle.source,
+      why: 'observed in traced calls and has no scan; scanning your own repositories will not close this',
+    }));
 }
 
 /**

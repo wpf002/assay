@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { bootstrapAdminToken, buildApp } from './app.js';
 import { MemoryScanStore } from './store/memory.js';
 import { PrismaScanStore } from './store/prisma.js';
@@ -9,7 +10,31 @@ const store: ScanStore =
     ? new MemoryScanStore()
     : PrismaScanStore.fromUrl(url);
 
-const app = await buildApp({ store, logger: true });
+/**
+ * The coverage signing key, if this deployment has one.
+ *
+ * Accepts the PEM itself or a path to it, because the first is what a secrets
+ * manager injects and the second is what a person does. Absent is a supported
+ * state: attestations come back marked unsigned rather than silently unsigned.
+ */
+function coverageKey(): string | undefined {
+  const value = process.env['ASSAY_COVERAGE_KEY'];
+  if (value === undefined || value === '') return undefined;
+  if (value.includes('-----BEGIN')) return value;
+  try {
+    return readFileSync(value, 'utf8');
+  } catch {
+    process.stderr.write(`ASSAY_COVERAGE_KEY points at ${value}, which could not be read\n`);
+    return undefined;
+  }
+}
+
+const key = coverageKey();
+const app = await buildApp({
+  store,
+  logger: true,
+  ...(key === undefined ? {} : { coverageKeyPem: key }),
+});
 
 /**
  * Mint the first admin token if the table is empty, and print it once.
