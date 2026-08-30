@@ -1,0 +1,42 @@
+{
+  "schema": "assay.attestation/v1",
+  "vendor": "Stripe",
+  "product": "Payments API",
+  "version": "2026-06-01",
+  "systemId": "payments-api",
+  "controlClass": "VENDOR_UPGRADEABLE",
+  "attestedBy": "security questionnaire, trust@example.com",
+  "attestedAt": "2026-07-15T00:00:00.000Z",
+  "validUntil": "2027-07-15T00:00:00.000Z",
+  "claims": [
+    {
+      "primitive": "ECDH",
+      "parameters": {
+        "curve": "P-256",
+        "ephemeral": "true"
+      },
+      "purpose": "KEY_ESTABLISHMENT",
+      "component": "public API TLS",
+      "configurable": false
+    },
+    {
+      "primitive": "RSA",
+      "parameters": {
+        "modulusLength": 2048
+      },
+      "purpose": "CERTIFICATE_AUTH",
+      "component": "webhook signing",
+      "configurable": false
+    }
+  ],
+  "roadmap": {
+    "status": "committed",
+    "availableFrom": "2029-06-30T00:00:00.000Z",
+    "algorithms": [
+      "ML-KEM"
+    ],
+    "requiresHardwareReplacement": false,
+    "notes": "Hybrid X25519MLKEM768 on the public API."
+  },
+  "reference": "TRUST-8821"
+}

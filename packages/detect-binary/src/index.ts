@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import { relative, resolve } from 'node:path';
+import { open, readFile } from 'node:fs/promises';
+import { basename, relative, resolve } from 'node:path';
 import fg from 'fast-glob';
 import { makeAsset, type ControlClass, type Finding, type Primitive } from '@assay/core';
 import { LOW_SPECIFICITY, findConstants, type ConstantHit } from './constants.js';
@@ -72,25 +72,83 @@ export const DEFAULT_BINARY_GLOBS: readonly string[] = [
   '**/*.wasm',
 ];
 
+/** ELF, Mach-O (32/64, both endiannesses, and the fat header), PE. */
+const MAGIC: readonly (readonly number[])[] = [
+  [0x7f, 0x45, 0x4c, 0x46], // \x7fELF
+  [0xfe, 0xed, 0xfa, 0xce], // Mach-O 32 BE
+  [0xfe, 0xed, 0xfa, 0xcf], // Mach-O 64 BE
+  [0xce, 0xfa, 0xed, 0xfe], // Mach-O 32 LE
+  [0xcf, 0xfa, 0xed, 0xfe], // Mach-O 64 LE
+  [0xca, 0xfe, 0xba, 0xbe], // Mach-O universal
+  [0x4d, 0x5a], // MZ
+];
+
+export function looksExecutable(head: Uint8Array): boolean {
+  return MAGIC.some((m) => m.every((byte, i) => head[i] === byte));
+}
+
+/** Reads four bytes per candidate, never the whole file. */
+async function filterByMagic(paths: readonly string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const path of paths) {
+    let fh;
+    try {
+      fh = await open(path, 'r');
+      const buf = Buffer.alloc(4);
+      const { bytesRead } = await fh.read(buf, 0, 4, 0);
+      if (bytesRead === 4 && looksExecutable(buf)) out.push(path);
+    } catch {
+      /* unreadable is not scannable */
+    } finally {
+      await fh?.close();
+    }
+  }
+  return out;
+}
+
 export async function scanBinaries(opts: BinaryScanOptions): Promise<BinaryScanResult> {
   const root = resolve(opts.root);
   // Firmware images and shipped runtimes are the point of this detector and
   // are routinely over 100 MB - the Node binary itself is. A 64 MB cap
   // silently skipped exactly the files worth scanning.
   const maxBytes = opts.maxFileBytes ?? 512 * 1024 * 1024;
-  const files = await fg([...(opts.include ?? DEFAULT_BINARY_GLOBS)], {
+  const ignore = [...(opts.ignore ?? ['**/.git/**'])];
+  const globbed = await fg([...(opts.include ?? DEFAULT_BINARY_GLOBS)], {
     cwd: root,
-    ignore: [...(opts.ignore ?? ['**/.git/**'])],
+    ignore,
     absolute: true,
     suppressErrors: true,
     followSymbolicLinks: false,
   });
 
+  // Extension globs miss the most common shape a vendor binary actually takes.
+  // A shipped agent is /opt/vendor/bin/agent with no extension at all, and
+  // every Unix executable is: matching only *.so and *.exe scanned the
+  // libraries and skipped the program. So files with no extension are checked
+  // by magic number instead - four bytes, on files the globs did not already
+  // claim, which is cheap enough to do unconditionally and honest about what
+  // it does and does not cover.
+  const claimed = new Set(globbed);
+  const extensionless = opts.include === undefined
+    ? (
+        await fg(['**/*'], {
+          cwd: root,
+          ignore,
+          absolute: true,
+          suppressErrors: true,
+          followSymbolicLinks: false,
+          onlyFiles: true,
+        })
+      ).filter((f) => !claimed.has(f) && !basename(f).includes('.'))
+    : [];
+
+  const candidates = [...globbed, ...(await filterByMagic(extensionless))];
+
   const findings: Finding[] = [];
   const reports: BinaryReport[] = [];
   let scanned = 0;
 
-  for (const abs of files.sort()) {
+  for (const abs of candidates.sort()) {
     let data: Buffer;
     try {
       data = await readFile(abs);

@@ -1,0 +1,45 @@
+{
+  "collectedAt": "2026-08-30T00:00:00.000Z",
+  "source": "aws kms list-keys",
+  "keys": [
+    {
+      "id": "arn:aws:kms:us-east-1:1234:key/a1",
+      "provider": "aws-kms",
+      "scope": "1234",
+      "region": "us-east-1",
+      "keySpec": "RSA_2048",
+      "usage": "ENCRYPT_DECRYPT",
+      "enabled": true,
+      "hsmBacked": false,
+      "rotationEnabled": true,
+      "createdAt": "2021-03-04T00:00:00.000Z",
+      "description": "payments envelope key"
+    },
+    {
+      "id": "arn:aws:kms:us-east-1:1234:key/b2",
+      "provider": "aws-kms",
+      "scope": "1234",
+      "region": "us-east-1",
+      "keySpec": "ECC_NIST_P256",
+      "usage": "SIGN_VERIFY",
+      "enabled": true,
+      "hsmBacked": true,
+      "rotationEnabled": false,
+      "createdAt": "2020-11-02T00:00:00.000Z",
+      "description": "card token signer"
+    },
+    {
+      "id": "cloudhsm:cluster-7/key/c3",
+      "provider": "kmip",
+      "scope": "cluster-7",
+      "region": "us-east-1",
+      "keySpec": "RSA_4096",
+      "usage": "SIGN_VERIFY",
+      "enabled": true,
+      "hsmBacked": true,
+      "rotationEnabled": false,
+      "createdAt": "2019-08-19T00:00:00.000Z",
+      "description": "root signing key"
+    }
+  ]
+}

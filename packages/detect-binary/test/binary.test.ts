@@ -7,7 +7,7 @@ import * as x509 from '@peculiar/x509';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { computeConfidence, gate, type Finding, type Occurrence } from '@assay/core';
 import { assemble } from '@assay/correlate';
-import {
+import { looksExecutable,
   CONSTANT_SIGNATURES,
   analyzeBinary,
   detectFormat,
@@ -819,3 +819,36 @@ function pkcs1From(pkcs8: Buffer): Buffer {
 function resolveNodeDir(): string {
   return process.execPath.slice(0, process.execPath.lastIndexOf('/'));
 }
+
+describe('extensionless executables', () => {
+  /**
+   * The most common shape a vendor binary actually takes is /opt/vendor/bin/agent
+   * with no extension at all. Matching only *.so and *.exe scanned the libraries
+   * and skipped the program, which is the file the vendor actually ships.
+   */
+  it('recognizes the formats a shipped agent is built as', () => {
+    expect(looksExecutable(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))).toBe(true);
+    expect(looksExecutable(Buffer.from([0xcf, 0xfa, 0xed, 0xfe]))).toBe(true);
+    expect(looksExecutable(Buffer.from([0xca, 0xfe, 0xba, 0xbe]))).toBe(true);
+    expect(looksExecutable(Buffer.from([0x4d, 0x5a, 0x90, 0x00]))).toBe(true);
+  });
+
+  it('does not claim a text file', () => {
+    expect(looksExecutable(Buffer.from('#!/bin/sh\n'))).toBe(false);
+    expect(looksExecutable(Buffer.from('{"a":1}'))).toBe(false);
+    expect(looksExecutable(Buffer.from([0x7f, 0x45]))).toBe(false);
+  });
+
+  it('scans a real extensionless binary that no glob would have matched', async () => {
+    const { mkdtemp, copyFile, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'assay-bin-'));
+    // A real system binary, named the way a vendor names an agent.
+    await copyFile('/bin/sh', join(dir, 'vendor-agent'));
+    await writeFile(join(dir, 'README'), 'not a binary, and no extension either');
+
+    const r = await scanBinaries({ root: dir, systemId: 's', collectedAt: '2026-08-30T00:00:00.000Z' });
+    expect(r.filesScanned).toBe(1);
+  });
+});

@@ -1,0 +1,39 @@
+{
+  "schema": "assay.attestation/v1",
+  "vendor": "Thales",
+  "product": "payShield 10K",
+  "version": "3.2",
+  "systemId": "payments-api",
+  "controlClass": "HARDWARE",
+  "attestedBy": "vendor SE, sales-eng@example.com",
+  "attestedAt": "2026-06-01T00:00:00.000Z",
+  "validUntil": "2027-06-01T00:00:00.000Z",
+  "claims": [
+    {
+      "primitive": "RSA",
+      "parameters": {
+        "modulusLength": 2048
+      },
+      "purpose": "KEY_ESTABLISHMENT",
+      "component": "host command interface",
+      "configurable": false
+    },
+    {
+      "primitive": "ECDSA",
+      "parameters": {
+        "curve": "P-256"
+      },
+      "purpose": "DIGITAL_SIGNATURE",
+      "component": "card signing",
+      "configurable": false
+    }
+  ],
+  "roadmap": {
+    "status": "evaluating",
+    "availableFrom": null,
+    "algorithms": [],
+    "requiresHardwareReplacement": true,
+    "notes": "No committed date. Vendor states ML-DSA requires a hardware refresh."
+  },
+  "reference": "RFI-2026-114"
+}

@@ -7,6 +7,7 @@ import { probeTarget } from '@assay/detect-network';
 import { lifetimeBreaches, parseCertificates, toFindings as pkiFindings } from '@assay/detect-pki';
 import { decimalYear, loadPack } from '@assay/policy';
 import { nowOption, numberOption } from '../options.js';
+import { requestHeaders } from '../http.js';
 
 export interface ProbeCommandOptions {
   readonly grant: string;
@@ -20,6 +21,14 @@ export interface ProbeCommandOptions {
   readonly clockSkewSeconds?: string;
   readonly json?: boolean;
   readonly now?: string;
+  /**
+   * Where to send the evidence. Without this a probe writes a CBOM to disk and
+   * the estate never learns that the endpoints were looked at, so the coverage
+   * attestation goes on saying live network endpoints were never examined -
+   * which by then is false, and the report is the one artifact that must not be.
+   */
+  readonly api?: string;
+  readonly token?: string;
 }
 
 export async function runProbe(targets: string[], options: ProbeCommandOptions): Promise<void> {
@@ -112,6 +121,27 @@ export async function runProbe(targets: string[], options: ProbeCommandOptions):
   });
   await writeFile(resolve(options.out), `${JSON.stringify(cbom, null, 2)}\n`, 'utf8');
 
+  let pushedAs: string | null = null;
+  if (options.api !== undefined) {
+    const res = await fetch(`${options.api.replace(/\/$/, '')}/scans`, {
+      method: 'POST',
+      headers: requestHeaders(options.api, options.token),
+      body: JSON.stringify({
+        systemName: systemId,
+        detectors: ['detect-network'],
+        policyPackId: pack.packId,
+        policyPackVersion: pack.packVersion,
+        scopeGrantId: grant.grantId,
+        startedAt: collectedAt,
+        finishedAt: new Date().toISOString(),
+        occurrences,
+        assets,
+      }),
+    });
+    if (!res.ok) throw new Error(`push failed: ${res.status} ${await res.text()}`);
+    pushedAs = ((await res.json()) as { id: string }).id;
+  }
+
   const breaches = lifetimeBreaches(
     certificates,
     pack.regulatoryDeadlines.AUTHENTICITY,
@@ -120,7 +150,7 @@ export async function runProbe(targets: string[], options: ProbeCommandOptions):
 
   if (options.json === true) {
     process.stdout.write(
-      `${JSON.stringify({ worklists, probed, refused, breaches, cbomPath: options.out }, null, 2)}\n`,
+      `${JSON.stringify({ worklists, probed, refused, breaches, cbomPath: options.out, pushedAs }, null, 2)}\n`,
     );
     return;
   }

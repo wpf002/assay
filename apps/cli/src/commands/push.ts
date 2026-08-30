@@ -5,6 +5,7 @@ import { scanDependencies } from '@assay/detect-deps';
 import { scanCertificates } from '@assay/detect-pki';
 import { importInventory, kmsFindings } from '@assay/detect-kms';
 import { hostFindings, importHosts } from '@assay/detect-host';
+import { attestationFindings, loadAttestation } from '@assay/attest';
 import { scanBinaries } from '@assay/detect-binary';
 import { loadPack } from '@assay/policy';
 import { loadTraces } from './traces.js';
@@ -34,6 +35,11 @@ export interface PushOptions {
    * actually running, rather than what a repository proposes.
    */
   readonly hosts?: string;
+  /**
+   * Vendor attestations. The only evidence there will ever be for an appliance
+   * or a SaaS, and ceilinged at 0.4 because it is somebody's word.
+   */
+  readonly attest?: string[];
   /** OTLP export or normalized bundle. Reaches across the network edge. */
   readonly traces?: string;
   readonly now?: string;
@@ -95,6 +101,17 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
     }
   }
 
+  let attested = 0;
+  for (const path of options.attest ?? []) {
+    const attestation = await loadAttestation(path);
+    const result = attestationFindings(attestation, { collectedAt, now });
+    findings.push(...result.findings);
+    attested++;
+    if (result.findings.length === 0) {
+      process.stderr.write(`  ${path}: nothing classifiable in that attestation\n`);
+    }
+  }
+
   const assembled = assemble(findings);
   const reach = analyzeReachability(assembled.occurrences, source.graph);
   const traces = options.traces === undefined ? null : await loadTraces(options.traces);
@@ -115,6 +132,7 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
       ...(binary.filesScanned > 0 ? ['detect-binary'] : []),
       ...(options.keyInventory ? ['detect-kms'] : []),
       ...(hostsSeen > 0 ? ['detect-host'] : []),
+      ...(attested > 0 ? ['attest'] : []),
     ],
     policyPackId: pack.packId,
     policyPackVersion: pack.packVersion,
