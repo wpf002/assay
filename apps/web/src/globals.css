@@ -890,11 +890,11 @@ button:focus-visible {
   padding: var(--s4) 0 0;
 }
 
-/* Sits directly on the scale it labels. A full step of air between them read
-   as two unrelated things rather than as a heading and its ruler. */
+/* Enough air to read as a heading over its ruler, rather than as two lines of
+   one wrapped label. */
 .axis-title {
   display: block;
-  margin-bottom: var(--s1);
+  margin-bottom: 15px;
 }
 
 .axis-scale {

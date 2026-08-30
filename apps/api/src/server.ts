@@ -55,6 +55,31 @@ if ((await store.countUsableTokens(new Date().toISOString())) === 0) {
 }
 const port = Number(process.env['PORT'] ?? 3001);
 
+/**
+ * Loopback by default.
+ *
+ * This binds 0.0.0.0 no longer. What the API serves is an inventory of an
+ * organization's weakest cryptography, which is also a map of where to attack
+ * it, and a developer starting it on a laptop is not deciding to publish that
+ * to every device on the coffee-shop wifi. The default here was doing exactly
+ * that, and the logs from one afternoon on a home network show an ONVIF probe
+ * and a log4shell-style JNDI callback attempt arriving from a neighbouring
+ * device.
+ *
+ * Authentication held - every one of those got a 401 - but a token check is the
+ * last line, not the first, and an unauthenticated attacker should not be able
+ * to reach the router at all. Binding wider is still possible and is now a
+ * decision somebody makes on purpose.
+ */
+const host = process.env['ASSAY_BIND'] ?? '127.0.0.1';
+if (host !== '127.0.0.1' && host !== '::1' && host !== 'localhost') {
+  process.stderr.write(
+    `\n  ASSAY_BIND=${host}: this API is reachable from outside this machine.\n` +
+      '  It serves an inventory of your weakest cryptography. Put it behind TLS\n' +
+      '  and something that limits who can reach the port.\n\n',
+  );
+}
+
 app.log.info(
   store.kind === 'memory'
     ? 'no DATABASE_URL: running with an in-memory store, scans will not survive a restart'
@@ -62,7 +87,8 @@ app.log.info(
 );
 
 try {
-  await app.listen({ port, host: '0.0.0.0' });
+  await app.listen({ port, host });
+  app.log.info(`listening on ${host}:${port}`);
 } catch (e) {
   app.log.error(e);
   process.exit(1);
