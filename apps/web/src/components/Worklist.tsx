@@ -168,6 +168,14 @@ export function Worklist({
               </div>
             </section>
           ))}
+          {/* Closes the shorter of the two columns, so a half-height rule and a
+              void beneath it read as the end of a list rather than as a bug. */}
+          <p className="track-end">
+            End of {title.toLowerCase()}. {findings.length} item
+            {findings.length === 1 ? '' : 's'} across{' '}
+            {packages(findings).length} work package
+            {packages(findings).length === 1 ? '' : 's'}.
+          </p>
         </>
       )}
     </div>

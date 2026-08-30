@@ -272,6 +272,8 @@ export interface CoverageClass {
   id: string;
   label: string;
   examined: boolean;
+  /** READY means a shipped detector covers it; UNBUILT means it is a roadmap item. */
+  capability: 'READY' | 'UNBUILT';
   occurrences: number;
   assets: number;
   systems: string[];

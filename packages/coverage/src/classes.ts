@@ -39,6 +39,21 @@ export interface ClassDefinition {
    */
   readonly remedy: string;
   /**
+   * Whether Assay can cover this class today.
+   *
+   * The distinction matters more than the report first made it look. A list of
+   * ten classes with six marked "not examined" reads as a list of things the
+   * tool cannot do. In fact five of the six are a detector that shipped and was
+   * simply not pointed at anything: the binary, KMS, network and PKI detectors
+   * all exist, and vendor attestation is a command. Exactly one class - hosts -
+   * has no implementation at all.
+   *
+   * READY means run the remedy and this class fills in.
+   * UNBUILT means the remedy is a roadmap item, and saying otherwise would be a
+   * promise the code does not keep.
+   */
+  readonly capability: 'READY' | 'UNBUILT';
+  /**
    * The thing this class is never covered by, stated because operators assume
    * otherwise. Empty when there is no common confusion to head off.
    */
@@ -48,6 +63,7 @@ export interface ClassDefinition {
 export const CLASSES: readonly ClassDefinition[] = [
   {
     id: 'APPLICATION_SOURCE',
+    capability: 'READY',
     label: 'Application source you build',
     modalities: ['SOURCE_AST', 'RUNTIME_HOOK'],
     remedy: 'point `assay scan` at the repository, or add it to the CI gate',
@@ -55,6 +71,7 @@ export const CLASSES: readonly ClassDefinition[] = [
   },
   {
     id: 'DEPLOYED_CONFIG',
+    capability: 'READY',
     label: 'Deployed configuration',
     modalities: ['SOURCE_CONFIG', 'HOST_AGENT'],
     remedy: 'scan the trees that hold nginx.conf, sshd_config, openssl.cnf or java.security, or supply host-agent output',
@@ -63,6 +80,7 @@ export const CLASSES: readonly ClassDefinition[] = [
   },
   {
     id: 'DEPENDENCIES',
+    capability: 'READY',
     label: 'Third-party libraries',
     modalities: ['DEPENDENCY'],
     remedy: 'scan a tree containing a lockfile or manifest',
@@ -71,27 +89,31 @@ export const CLASSES: readonly ClassDefinition[] = [
   },
   {
     id: 'VENDOR_BINARIES',
+    capability: 'READY',
     label: 'Vendor binaries and firmware',
     modalities: ['BINARY_SYMBOL', 'BINARY_CONSTANT', 'BINARY_STRING'],
-    remedy: 'scan the directories holding shipped binaries, or `assay scan --binaries` over an unpacked image',
+    remedy: 'point a scan at the directories holding shipped binaries; binary analysis is on by default',
     caveat: 'a stripped or packed binary can defeat every one of these modalities without saying so',
   },
   {
     id: 'CERTIFICATES',
+    capability: 'READY',
     label: 'Certificates and host keys',
     modalities: ['PKI_CERTIFICATE'],
-    remedy: 'scan the trees holding PEM/DER material, or export the certificate inventory from your CA',
+    remedy: 'scan the trees holding PEM or DER material, or export the inventory from your CA',
     caveat: 'certificates found in a repository are not evidence of what a live endpoint presents',
   },
   {
     id: 'MANAGED_KEYS',
+    capability: 'READY',
     label: 'Managed keys (KMS, HSM, KMIP)',
     modalities: ['CLOUD_KMS_API'],
-    remedy: 'export the key inventory and pass `--key-inventory`, or grant a read-only KMS role',
+    remedy: 'export the key inventory and re-run with `--key-inventory <file>`',
     caveat: 'Assay never reads key material (I9); the provider names the key spec and that is all that is recorded',
   },
   {
     id: 'NETWORK_ENDPOINTS',
+    capability: 'READY',
     label: 'Live network endpoints',
     modalities: ['NETWORK_ACTIVE', 'NETWORK_PASSIVE'],
     remedy: 'run `assay probe` under a signed scope grant, or supply a pcap-derived inventory',
@@ -100,20 +122,23 @@ export const CLASSES: readonly ClassDefinition[] = [
   },
   {
     id: 'HOSTS',
+    capability: 'UNBUILT',
     label: 'Servers and endpoints',
     modalities: ['HOST_AGENT'],
-    remedy: 'ingest EDR or host-agent output (not yet implemented; see Phase 12)',
+    remedy: 'nothing ships for this yet: host and EDR ingest is the next detector to build',
     caveat: 'nothing in a source scan speaks for a host that has no repository',
   },
   {
     id: 'APPLIANCES',
+    capability: 'READY',
     label: 'Appliances and network devices',
     modalities: ['NETWORK_ACTIVE', 'ASSERTED'],
-    remedy: 'probe the management endpoint under a signed grant, or record the vendor attestation',
+    remedy: 'run `assay probe` against the management endpoint under a signed grant, or record the vendor attestation',
     caveat: 'an appliance with no probe and no attestation is invisible to this tool, not absent from your estate',
   },
   {
     id: 'THIRD_PARTY_SAAS',
+    capability: 'READY',
     label: 'Third-party and SaaS',
     modalities: ['ASSERTED'],
     remedy: 'record the vendor attestation with `assay attest`',

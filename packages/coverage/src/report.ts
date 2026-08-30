@@ -26,6 +26,8 @@ export interface ClassCoverage {
   readonly label: string;
   /** True only if a modality that can see this class actually produced evidence. */
   readonly examined: boolean;
+  /** Whether running the remedy would actually fill this class in today. */
+  readonly capability: 'READY' | 'UNBUILT';
   readonly modalitiesAvailable: readonly Modality[];
   readonly modalitiesUsed: readonly Modality[];
   readonly occurrences: number;
@@ -83,6 +85,7 @@ export interface CoverageInput {
  * and a signed document that permits that reading is worse than no document.
  */
 const NOT_ASSERTED: readonly string[] = [
+  'That a class marked unexamined is beyond this tool. Nine of the ten are covered by a detector that already ships and was not pointed at anything; the report says per class which one that is.',
   'That any class is completely inventoried. "Examined" means a modality that can see this class produced evidence; it does not bound what that modality missed.',
   'That a class with no findings contains no vulnerable cryptography. It means nothing was found by the modalities that ran.',
   'That findings are exposed. Presence is not exposure; reachability is stated per finding and is a separate claim (I5).',
@@ -126,6 +129,7 @@ export function coverageReport(input: CoverageInput): CoverageReport {
     return {
       id: c.id,
       label: c.label,
+      capability: c.capability,
       // Evidence, not intent. A detector that ran and found nothing has not
       // examined the class - it has failed to find anything in it, and those
       // read identically to an operator unless the distinction is enforced here.
@@ -175,10 +179,25 @@ function statement(
   unexamined: readonly ClassCoverage[],
   blindSpots: number,
 ): string {
+  const ready = unexamined.filter((c) => c.capability === 'READY');
+  const unbuilt = unexamined.filter((c) => c.capability === 'UNBUILT');
+  // Leading with "we did not look at six things" reads as six things the tool
+  // cannot do. Five of six are usually a detector nobody pointed anywhere, and
+  // that is a different sentence with a different next action.
   const missing =
     unexamined.length === 0
       ? 'every class of the estate produced evidence'
-      : `no evidence was gathered for ${unexamined.length} of ${total} classes: ${unexamined.map((c) => c.label).join('; ')}`;
+      : [
+          `no evidence was gathered for ${unexamined.length} of ${total} classes`,
+          ready.length === 0
+            ? ''
+            : `${ready.length} of those need only be pointed at something (${ready.map((c) => c.label).join('; ')})`,
+          unbuilt.length === 0
+            ? ''
+            : `${unbuilt.length} ${unbuilt.length === 1 ? 'has' : 'have'} no detector yet (${unbuilt.map((c) => c.label).join('; ')})`,
+        ]
+          .filter((p) => p !== '')
+          .join('; ')
   const blind =
     blindSpots === 0
       ? ''

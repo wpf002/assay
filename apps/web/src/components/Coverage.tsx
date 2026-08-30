@@ -57,26 +57,27 @@ export function Coverage({ scanId }: { scanId: string }) {
   if (state.status === 'error') return <p className="aside">{state.message}</p>;
 
   const { report, signed } = state.a;
-  const missed = report.classes.filter((c) => !c.examined);
   const seen = report.classes.filter((c) => c.examined);
+  // "We did not look at six things" reads as six things the tool cannot do.
+  // In fact almost all of them are a detector that shipped and was not pointed
+  // at anything, which is a different sentence with a different next action.
+  const gaps = report.classes.filter((c) => !c.examined && c.capability === 'READY');
+  const unbuilt = report.classes.filter((c) => !c.examined && c.capability === 'UNBUILT');
 
   return (
     <section className="coverage">
       <div className="coverage-head">
-        <h2>What We Did Not Look At</h2>
+        <h2>Rest Of The Estate</h2>
         <span className="coverage-count">
-          {missed.length > 0
-            ? `${missed.length} of ${report.summary.classesTotal} classes never examined`
-            : `All ${report.summary.classesTotal} classes examined`}
+          {seen.length} of {report.summary.classesTotal} covered
         </span>
       </div>
 
       <p className="coverage-sub">
-        Findings only mean something next to what was never examined. These are the classes this
-        scan did not cover, and what each one would take.
+        A scan of your repositories is not an inventory of your estate, and the difference is the
+        first thing an auditor asks about. Everything below is a part of the estate this run has no
+        evidence for, with the command that fixes it.
       </p>
-
-      <p className="coverage-statement">{report.summary.statement}</p>
 
       {report.blindSpots.length > 0 && (
         <p className="caveat caveat-warn">
@@ -86,15 +87,55 @@ export function Coverage({ scanId }: { scanId: string }) {
         </p>
       )}
 
+      {gaps.length > 0 && (
+        <>
+          <h3 className="coverage-group">
+            Not Scanned Yet<span className="coverage-group-n">{gaps.length}</span>
+          </h3>
+          <p className="coverage-group-sub">
+            Assay covers these today. Nothing has pointed it at them.
+          </p>
+          <table className="coverage-table">
+            <tbody>
+              {gaps.map((c) => (
+                <tr key={c.id} className="miss">
+                  <th scope="row">{c.label}</th>
+                  <td className="detail">{withCode(c.remedy)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {unbuilt.length > 0 && (
+        <>
+          <h3 className="coverage-group">
+            Not Built Yet<span className="coverage-group-n">{unbuilt.length}</span>
+          </h3>
+          <p className="coverage-group-sub">
+            No detector ships for these. Listed because leaving them off would make the inventory
+            look complete when it is not.
+          </p>
+          <table className="coverage-table">
+            <tbody>
+              {unbuilt.map((c) => (
+                <tr key={c.id} className="unbuilt">
+                  <th scope="row">{c.label}</th>
+                  <td className="detail">{withCode(c.remedy)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      <h3 className="coverage-group">
+        Covered<span className="coverage-group-n">{seen.length}</span>
+      </h3>
+      <p className="coverage-group-sub">And the limit of what each one proves.</p>
       <table className="coverage-table">
         <tbody>
-          {missed.map((c) => (
-            <tr key={c.id} className="miss">
-              <th scope="row">{c.label}</th>
-              <td className="verdict">Not examined</td>
-              <td className="detail">{withCode(c.remedy)}</td>
-            </tr>
-          ))}
           {seen.map((c) => (
             <tr key={c.id}>
               <th scope="row">{c.label}</th>

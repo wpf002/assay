@@ -662,38 +662,45 @@ export function Dashboard({
 
           <CoveragePanel scanId={scanId} />
 
-          <details className="notes">
-            <summary>
-              Not Counted Above ({worklists.unreached.length} unreachable, {worklists.hints.length}{' '}
-              library hints)
-            </summary>
-            <p>
-              <strong>Unreachable.</strong> Found in the code, but nothing that serves traffic calls
-              it. Test fixtures and dead modules land here.
-            </p>
-            <p>
-              <strong>Library hints.</strong> A dependency that <em>can</em> do this, with no call
-              site found. Somewhere to go looking, not a work item.
-            </p>
-          </details>
-
-          {activePack !== null && activePack.trust !== 'SIGNED' && (
-            <p className="caveat" style={{ color: 'var(--policy)' }}>
-              This pack is {activePack.trust.toLowerCase()}: {activePack.trustReason}. The
-              arithmetic is unchanged, but do not compare these dates with a ranking produced under
-              a signed pack.
-            </p>
-          )}
-
-          {/* Shipped figures are inputs, not truth claims. The reader of a
-              deadline the whole ranking turns on is the one who needs to know
-              what its publisher was unsure about. */}
-          {activePack !== null &&
-            activePack.caveats.map((c) => (
-              <p className="caveat" key={c}>
-                {c}
+          {/* Four unrelated notes that used to stack down the left margin with
+              the right half of the screen empty. One band, in columns. */}
+          <div className="footnotes">
+            <details className="notes">
+              <summary>
+                Not Counted Above ({worklists.unreached.length} unreachable,{' '}
+                {worklists.hints.length} library hints)
+              </summary>
+              <p>
+                <strong>Unreachable.</strong> Found in the code, but nothing that serves traffic
+                calls it. Test fixtures and dead modules land here.
               </p>
-            ))}
+              <p>
+                <strong>Library hints.</strong> A dependency that <em>can</em> do this, with no
+                call site found. Somewhere to go looking, not a work item.
+              </p>
+            </details>
+
+            {activePack !== null && activePack.trust !== 'SIGNED' && (
+              <p className="caveat" style={{ color: 'var(--policy)' }}>
+                <span className="footnote-title">Unsigned Pack</span>
+                This pack is {activePack.trust.toLowerCase()}: {activePack.trustReason}. The
+                arithmetic is unchanged, but do not compare these dates with a ranking produced
+                under a signed pack.
+              </p>
+            )}
+
+            {/* Shipped figures are inputs, not truth claims. The reader of a
+                deadline the whole ranking turns on is the one who needs to know
+                what its publisher was unsure about. */}
+            {activePack !== null && activePack.caveats.length > 0 && (
+              <div className="caveat">
+                <span className="footnote-title">What This Pack Is Unsure Of</span>
+                {activePack.caveats.map((c) => (
+                  <p key={c}>{c}</p>
+                ))}
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>

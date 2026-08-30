@@ -789,11 +789,33 @@ button:focus-visible {
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: var(--s7);
-  align-items: start;
+  /* Stretch, not start. The two lists are never the same length - 26 items
+     against 22 - and aligning to the top left the shorter column's rule
+     stopping halfway down, with a large unexplained void beneath it. */
+  align-items: stretch;
+}
+
+/* Closes the ragged bottom edge, so the section ends on a line rather than on
+   whichever list happened to be longer. */
+.tracks::after {
+  content: '';
+  grid-column: 1 / -1;
+  margin-top: var(--s5);
+  border-top: 1px solid var(--rule);
+}
+
+.track > .track-end {
+  margin-top: auto;
+  padding-top: var(--s4);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--text-3);
 }
 
 .track {
   position: relative;
+  display: flex;
+  flex-direction: column;
   background: none;
   border: 0;
   border-radius: 0;
@@ -1473,6 +1495,54 @@ table.evidence td.loc {
   padding-left: var(--s3);
 }
 
+/*
+ * The page footer: what was not counted, what the report will not claim, the
+ * signature, and the pack's own caveats. Four unrelated things that were four
+ * loose grey paragraphs stacked down the left margin with the right half of the
+ * screen empty. They are one band now, in columns, closed by a rule.
+ */
+.footnotes {
+  margin-top: var(--s6);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--rule-2);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--s5) var(--s7);
+  align-items: start;
+}
+
+.footnotes > * {
+  margin: 0;
+  min-width: 0;
+}
+
+.footnotes .caveat,
+.footnotes .notes {
+  margin: 0;
+  max-width: none;
+}
+
+.footnotes .caveat p {
+  margin: 0 0 var(--s2);
+  line-height: var(--lh-prose);
+}
+
+.footnotes .caveat p:last-child {
+  margin-bottom: 0;
+}
+
+.footnote-title {
+  display: block;
+  margin-bottom: var(--s2);
+  font-family: var(--sans);
+  font-size: var(--fs-eyebrow);
+  font-weight: 600;
+  line-height: var(--lh-flat);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
 .notes {
   margin-top: var(--s5);
   padding: var(--s4) 0 0;
@@ -1482,6 +1552,11 @@ table.evidence td.loc {
   border-radius: 0;
   font-size: var(--fs-meta);
   color: var(--text-3);
+}
+
+.footnotes .notes {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .notes summary {
@@ -1595,6 +1670,38 @@ table.evidence td.loc {
 
 .coverage-count {
   font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+
+/* Three groups: what a command would fix, what has no detector yet, and what
+   was covered. Undifferentiated, the list read as ten things the tool cannot do. */
+.coverage-group {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  margin: var(--s6) 0 0;
+  font-size: var(--fs-head);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: var(--ls-head);
+  color: var(--text);
+}
+
+.coverage-group-n {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.coverage-group-sub {
+  margin: var(--s1) 0 var(--s3);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--text-3);
+}
+
+.coverage-table tr.unbuilt th {
   color: var(--text-3);
 }
 
