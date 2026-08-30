@@ -1,19 +1,56 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { getDerivation, type Derivation, type RankedFinding } from '@/lib/api';
 import {
+  CONTROL,
   MODALITY,
   PURPOSE,
   WHERE,
-  action,
   actionDetail,
   assetLabel,
   driver,
   due,
+  duration,
   whyThisDate,
   whyWeBelieve,
 } from '@/lib/format';
-import { Timeline } from './Timeline';
+import { PackageChart, TimelineAxis } from './Timeline';
 import { Tree } from './Tree';
+
+/**
+ * A run of consecutive rows that share every figure the head of the list would
+ * print for them.
+ *
+ * Slack, lateness, the binding constraint and both Mosca terms are pure
+ * functions of (track, control class): slack is strictly decreasing in Y and Y
+ * comes from the control class, so the ranking's slack-ascending order already
+ * arrives grouped. The key carries every value the package head asserts, so a
+ * package cannot state something untrue of a row inside it - if the data ever
+ * varies, the run simply breaks and a second package is emitted. Grouping by
+ * run rather than by map is what keeps the list in strict rank order.
+ */
+interface Package {
+  key: string;
+  rep: RankedFinding;
+  rows: RankedFinding[];
+}
+
+function packages(findings: readonly RankedFinding[]): Package[] {
+  const out: Package[] = [];
+  for (const f of findings) {
+    const key = [
+      f.controlClass,
+      f.late,
+      f.slackYears,
+      f.bindingConstraint,
+      f.mosca.x,
+      f.mosca.y,
+    ].join('|');
+    const last = out[out.length - 1];
+    if (last !== undefined && last.key === key) last.rows.push(f);
+    else out.push({ key, rep: f, rows: [f] });
+  }
+  return out;
+}
 
 /**
  * One of the two worklists. Never both.
@@ -22,6 +59,12 @@ import { Tree } from './Tree';
  * whole product: not a dashboard that tells you the estate is 62% ready, but a
  * page where the reason for each figure is three clicks away and ends at a
  * file and a line number.
+ *
+ * The list is drawn as work packages rather than as flat rows. The date, the
+ * verdict, the action and the chart were identical for every row of a control
+ * class and were being restated once per row; said once at the head of the
+ * package, across the full width of the column, they are an argument, and the
+ * rows underneath are free to carry only what actually differs between them.
  */
 export function Worklist({
   kicker,
@@ -35,6 +78,7 @@ export function Worklist({
   showSystem,
   crqcYear,
   compareTitle,
+  domain,
 }: {
   /** Which of the two Mosca tracks this is. The title is what the track holds. */
   kicker: string;
@@ -56,6 +100,13 @@ export function Worklist({
   crqcYear: number | null;
   /** Named on a moved row, because "the other pack" is not a pack anyone can look up. */
   compareTitle: string | null;
+  /**
+   * The shared x-axis, in years, computed once across BOTH tracks. The two
+   * lists sit side by side, so they have to be one ruler; per-track domains
+   * would put two differently scaled charts next to each other and invite
+   * exactly the comparison they cannot support.
+   */
+  domain: number;
 }) {
   const [open, setOpen] = useState<string | null>(null);
 
@@ -69,26 +120,69 @@ export function Worklist({
       {findings.length === 0 ? (
         <div className="empty">No work items on this list.</div>
       ) : (
-        findings.map((f) => (
-          <Row
-            key={f.occurrenceId}
-            f={f}
-            scanId={scanId}
-            pack={pack}
-            moved={moved.get(f.occurrenceId)}
-            secrecyYears={secrecyYears}
-            showSystem={showSystem}
-            crqcYear={crqcYear}
-            compareTitle={compareTitle}
-            open={open === f.occurrenceId}
-            onToggle={() => setOpen(open === f.occurrenceId ? null : f.occurrenceId)}
-          />
-        ))
+        <>
+          <TimelineAxis first={findings[0]} domain={domain} crqcYear={crqcYear} />
+          {packages(findings).map((p, i) => (
+            <section
+              className="pkg"
+              key={`${p.key}-${i}`}
+              data-late={p.rep.late ? '' : undefined}
+            >
+              <div className="pkg-head">
+                <div className="pkg-id">
+                  <span className="pkg-kind">
+                    {duration(p.rep.mosca.y)} to replace · {driver(p.rep, crqcYear ?? undefined)}
+                  </span>
+                  <h3 className="pkg-name">
+                    {CONTROL[p.rep.controlClass] ?? p.rep.controlClass}
+                  </h3>
+                  <span className="pkg-n">
+                    {p.rows.length} item{p.rows.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <div className="pkg-when">
+                  <span className={`chip ${p.rep.late ? 'late' : ''}`}>
+                    {p.rep.late ? 'Overdue' : 'In Time'}
+                  </span>
+                  <span className={`when ${p.rep.late ? 'late' : ''}`}>{due(p.rep)}</span>
+                </div>
+              </div>
+
+              <PackageChart f={p.rep} domain={domain} />
+
+              <div className="pkg-rows">
+                {p.rows.map((f) => (
+                  <Row
+                    key={f.occurrenceId}
+                    f={f}
+                    scanId={scanId}
+                    pack={pack}
+                    moved={moved.get(f.occurrenceId)}
+                    secrecyYears={secrecyYears}
+                    showSystem={showSystem}
+                    compareTitle={compareTitle}
+                    open={open === f.occurrenceId}
+                    onToggle={() => setOpen(open === f.occurrenceId ? null : f.occurrenceId)}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </>
       )}
     </div>
   );
 }
 
+/**
+ * One occurrence, carrying only what varies inside its package.
+ *
+ * The date, the Overdue chip, the binding deadline and the chart have all
+ * moved up to the package head, where they are stated once instead of once per
+ * row. What is left is the asset, where it runs, whether the evidence was
+ * confirmed, and how sure we are - and that last figure is the only number
+ * that changes row to row, so it gets the list's one numeric column.
+ */
 function Row({
   f,
   scanId,
@@ -96,7 +190,6 @@ function Row({
   moved,
   secrecyYears,
   showSystem,
-  crqcYear,
   compareTitle,
   open,
   onToggle,
@@ -107,21 +200,19 @@ function Row({
   moved: { before: number; after: number } | undefined;
   secrecyYears: number;
   showSystem: boolean;
-  crqcYear: number | null;
   compareTitle: string | null;
   open: boolean;
   onToggle: () => void;
 }) {
+  // Banded to five points. The underlying figure is a noisy-OR estimate over
+  // per-modality ceilings; printing it to the whole percent claims a
+  // resolution the arithmetic does not have.
+  const sure = Math.round(f.confidence * 20) * 5;
+
   return (
     <>
       <div className="row" role="button" aria-expanded={open} onClick={onToggle}>
-        {/* Always rendered. The not-late case used to be transparent text, so
-            the column read as empty rather than as a verdict. */}
-        <div className="slack">
-          <span className={`chip ${f.late ? 'late' : ''}`}>{f.late ? 'Overdue' : 'In Time'}</span>
-        </div>
-
-        <div>
+        <div className="id">
           <div className="name">
             {assetLabel(f)}
             <span className="dim"> · {PURPOSE[f.purpose] ?? f.purpose}</span>
@@ -130,10 +221,7 @@ function Row({
           <div className="meta">
             {showSystem && <strong>{f.systemId}</strong>}
             {showSystem && ' · '}
-            <span className="act">{action(f)}</span>
-            {WHERE[f.reachedVia] !== undefined && WHERE[f.reachedVia] !== '' && (
-              <> · {WHERE[f.reachedVia]}</>
-            )}
+            <span className="act">{WHERE[f.reachedVia] ?? f.reachedVia}</span>
             {f.assertionLevel !== 'CONFIRMED' && <> · Observed, not confirmed</>}
             {moved !== undefined && (
               <span className="moved">
@@ -144,14 +232,9 @@ function Row({
               </span>
             )}
           </div>
-
         </div>
 
-        <div className="whenwrap">
-          <div className={`when ${f.late ? 'late' : ''}`}>{due(f)}</div>
-          <div className="driver">{driver(f, crqcYear ?? undefined)}</div>
-          <Timeline f={f} />
-        </div>
+        <div className="conf">{sure}% sure</div>
 
         <div className="chev" aria-hidden="true">
           {open ? '▾' : '▸'}
@@ -169,7 +252,6 @@ function Row({
     </>
   );
 }
-
 
 function Detail({
   scanId,
@@ -258,8 +340,21 @@ function Detail({
                   <tr key={`${g.contributing}-${t.modality}`} className={t.modality === g.contributing ? 'counted' : 'ignored'}>
                     <td>{MODALITY[t.modality] ?? t.modality}</td>
                     <td className="num">{t.count === 1 ? 'once' : `${t.count} times`}</td>
-                    <td className="num">up to {Math.round(t.ceiling * 100)}%</td>
-                    <td>{t.modality === g.contributing ? 'Counted' : 'Already counted'}</td>
+                    {/* The ceiling as a length, drawn as a cap and not as a
+                        contribution: a modality that was already counted gets
+                        the same bar hollow, because it added nothing. A dimmed
+                        solid bar would read as "contributed a little", which is
+                        the one place on this page where a picture could lie
+                        about the arithmetic. */}
+                    <td
+                      className="ceil"
+                      style={{ '--w': `${Math.round(t.ceiling * 100)}%` } as CSSProperties}
+                    >
+                      <span>
+                        up to {Math.round(t.ceiling * 100)}%
+                        {t.modality === g.contributing ? '' : ' · already counted'}
+                      </span>
+                    </td>
                   </tr>
                 )),
               )}

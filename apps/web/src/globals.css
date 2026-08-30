@@ -1,38 +1,108 @@
 /*
- * A dark instrument panel, not a dark-mode website.
+ * ASSAY - RULED LEDGER
  *
- * This screen is read by someone deciding what to spend a year on, usually
- * with someone else looking over their shoulder. So: one accent, semantic
- * colour used only where it means something, numbers that line up, and no
- * decoration that is not carrying information.
+ * An operator's instrument, read by someone defending a budget with a second
+ * person looking over their shoulder. Three devices carry the whole page: a
+ * horizontal rule opens a section, a vertical hairline divides the two
+ * worklists, and a figure hangs in the left margin. There are no cards.
+ *
+ * The organising unit is the work package, not the row. Slack, lateness, the
+ * binding deadline and the bar are all pure functions of (track, control
+ * class), so twenty rows previously drew at most five distinct charts, each
+ * four times over, in a column 250px wide. The chart is now drawn once per
+ * package, full width, and the rows underneath carry only what actually varies
+ * between them: the asset, where it runs, and how sure we are.
+ *
+ * Colour is spent on data and never on decoration. Red is overdue, amber is
+ * policy, green is safe, and one accent marks what you have opened.
  */
 
+/* ------------------------------------------------------------------ tokens */
+
 :root {
-  /* Ground and surfaces. Near-black with a trace of blue, so panels can sit
-     above it without needing a border on everything. */
+  /* Ground. Two fills survive on the whole page: the track header bar and the
+     row hover. Everything else sits directly on --bg. */
   --bg: #0a0c0f;
   --surface: #11141a;
   --surface-2: #161a21;
   --surface-3: #1c212a;
-  --line: #232935;
-  --line-soft: #1a1f28;
+  --panel: #0d1015;
 
-  --text: #e8ecf2;
-  --text-2: #9aa5b4;
-  --text-3: #6b7686;
+  /* Rules, in three weights. Only --edge is allowed to bound anything, and
+     only six things are allowed to use it: form controls, the ghost button,
+     the divider between the two worklists, the axis baseline, a non-binding
+     deadline rule, and the confidence ceiling cap. Everything else gets a
+     hairline or nothing. This ration is what stops the page drifting back
+     into eight competing rectangles. */
+  --rule: #232935;   /* 1.34:1 on --bg. Row separators. Decorative. */
+  --rule-2: #2b323f; /* 1.52:1 on --bg. Section rules. Decorative. */
+  --edge: #5d6879;   /* 3.47 --bg, 3.27 --surface, 3.09 --surface-2.
+                        Clears WCAG 1.4.11 on every ground it is used on. */
 
-  /* Semantic only. Red means overdue, amber means policy, green means safe.
-     Nothing here is coloured for emphasis alone. */
-  --overdue: #ff6b5e;
-  --safe: #4ec9a4;
-  --policy: #e5b567;
-  --accent: #7aa2f7;
+  /* Text. --text-3 was #6b7686: 4.25 / 4.00 / 3.79 against the three grounds
+     it appeared on, below the 4.5:1 AA floor at every size it was set at, in
+     roughly half of all colour declarations on the page. */
+  --text: #e8ecf2;   /* 16.52 bg · 15.55 surface · 14.71 surface-2   AAA */
+  --text-2: #a7b2c2; /*  9.13 bg ·  8.60 surface ·  8.13 surface-2   AAA */
+  --text-3: #8b96a7; /*  6.54 bg ·  6.16 surface ·  5.83 surface-2   AA  */
+
+  /* Semantic. Unchanged in meaning. Amber now sets the deadline dates
+     themselves rather than decorating a border stripe. */
+  --overdue: #ff6b5e; /* 7.01 bg · 6.60 surface · 6.24 surface-2 */
+  --safe: #4ec9a4;    /* 9.53 bg · 8.97 surface */
+  --policy: #e5b567;  /* 10.39 bg · 9.78 surface */
+  --accent: #7aa2f7;  /* 7.78 bg · 7.32 surface */
+
+  /* Chart ink. WCAG 1.4.11 asks 3:1 of a graphic you must see to understand
+     the content. The old bar fills were 1.92:1 and 1.99:1 - below the level
+     at which a normally sighted reader can see them at all. */
+  --bar-ok: #3f8570;   /* 4.48 bg · 4.22 surface */
+  --bar-late: #c25a4d; /* 4.54 bg · 4.27 surface */
+  --bar-tail: #5f6a7c; /* 3.58 bg · 3.37 surface */
+
+  /* Type. Five text tiers and one display tier, replacing fourteen raw sizes
+     that lived inside a 4px band. Steps: 14% / 20% / 33% / 35% / 107%. The
+     11 -> 12.5 step is the only small one, and those two tiers are told apart
+     by case, tracking and weight rather than by size. */
+  --fs-eyebrow: 11px;
+  --fs-meta: 12.5px;
+  --fs-base: 15px;
+  --fs-head: 20px;
+  --fs-lead: 27px;
+  --fs-display: 56px;
+
+  --lh-flat: 1;
+  --lh-data: 1.3;
+  --lh-meta: 1.45;
+  --lh-prose: 1.6;
+
+  --ls-eyebrow: 0.13em;
+  --ls-head: -0.014em;
+  --ls-lead: -0.018em;
+  --ls-display: -0.04em;
+
+  --measure: 66ch;
+
+  /* Space. Seven steps, replacing twenty-four ad-hoc pixel values. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+
+  --conf-w: 84px;
+  --chev-w: 14px;
+  --col-gap: 20px;
+  /* Rows and the track header bleed this far past the text rail, so a hover
+     fill has room without pushing the text off the rail. */
+  --bleed: 12px;
 
   --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
   --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-serif;
 
-  --r: 8px;
-  --r-sm: 6px;
+  --r-sm: 3px;
 }
 
 * {
@@ -47,8 +117,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 var(--sans);
-  font-variant-numeric: tabular-nums;
+  font: 400 var(--fs-base) / var(--lh-prose) var(--sans);
 }
 
 a {
@@ -62,222 +131,292 @@ a:hover {
 
 code {
   font-family: var(--mono);
-  font-size: 0.92em;
+  font-size: 0.88em;
   color: var(--text-2);
 }
 
 .wrap {
-  max-width: 1560px;
+  max-width: 1680px;
   margin: 0 auto;
-  padding: 20px 24px 48px;
+  padding: var(--s5) clamp(20px, 2.6vw, 44px) var(--s7);
+}
+
+/*
+ * Every figure on the page, and nothing else. This is what makes a column of
+ * dates and percentages scan as a ruler rather than as text. Tabular figures
+ * were previously set globally on body, which is backwards twice over: it puts
+ * them inside running prose, where they leave gaps around 1 and around
+ * punctuation, and it removes the one signal that marks a figure as a figure.
+ */
+.headline .big,
+.band .band-row .d,
+.band .band-row .n,
+.track > h2 .count,
+.next button .n,
+.pkg-n,
+.pkg-when .when,
+.axis .tick,
+.row .conf,
+.coverage-count,
+.coverage-table .verdict,
+.tree .val,
+.stepper input,
+table.sure td.num,
+table.sure td.ceil {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums lining;
+}
+
+/*
+ * One eyebrow recipe. Replaces seven near-identical uppercase-label rules set
+ * at 9px, 10px, 10.5px and 11px in three weights and three trackings.
+ */
+.controls-label,
+.field-label,
+.band .band-label,
+.band .band-row .k,
+.track > h2 .kicker,
+.axis-title,
+.pkg-kind,
+.pkg-when .chip,
+.panel h3,
+.tree .kind {
+  font-family: var(--sans);
+  font-size: var(--fs-eyebrow);
+  font-weight: 600;
+  line-height: var(--lh-flat);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-3); /* 6.54:1 on --bg */
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A section opens with a rule and closes with space. With the vertical
+ * hairline between the worklists, that is the entire structural vocabulary.
+ *
+ * Section heads sit at the lead tier, one full step above the package names
+ * inside them. They were 15px and 14.5px over 15px row names - a container
+ * outranked by its own contents, which is exactly why the two-track split did
+ * not register as two labelled lists. The verdict shares this size and is told
+ * apart by weight, measure and the 56px figure hanging beside it.
+ */
+.next h2,
+.coverage h2,
+.track > h2 {
+  margin: 0;
+  font-size: var(--fs-lead);
+  font-weight: 600;
+  line-height: 1.16;
+  letter-spacing: var(--ls-head);
+  color: var(--text);
+}
+
+.next h2,
+.coverage h2 {
+  padding-top: var(--s4);
+  border-top: 1px solid var(--rule-2);
 }
 
 /* ------------------------------------------------------------------ header */
 
+/*
+ * Was a wrapping flex row: the title block sized to max-content and the
+ * controls to their own content, so the controls always wrapped to a second
+ * line and margin-left:auto shoved them right, leaving a wide empty hole in
+ * the middle of the header. Now an explicit two-column grid with the controls
+ * as a full-width rail underneath.
+ */
 header.top {
-  display: flex;
-  align-items: flex-end;
-  gap: 28px;
-  flex-wrap: wrap;
-  padding-bottom: 16px;
-  margin-bottom: 22px;
-  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: var(--s7);
+  padding: 0;
+  margin-bottom: var(--s5);
+  border-bottom: 0;
 }
 
-header.top h1 {
-  font-size: 17px;
-  font-weight: 650;
-  margin: 0 0 3px;
-  letter-spacing: -0.01em;
+/* Promotes .brand and the Sign Out button into the header grid, with no change
+   to the JSX. Works unchanged where Masthead is rendered without a wrapper. */
+.top-title {
+  display: contents;
 }
 
-/* The wordmark, the sentence saying what this is, and the scan receipt. */
 .brand {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--s2);
+  min-width: 0;
 }
 
+.top-title > .ghost {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  align-self: start;
+}
+
+/* The wordmark carries no information, so it is sized as chrome. It used to be
+   17px/650 and outranked every heading on the page. */
+header.top h1,
 .brand h1 {
   margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 700;
+  line-height: var(--lh-flat);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text);
 }
 
+/* The sentence that answers "what is this" is now the brightest thing in the
+   header rather than the third dimmest: 15px at 9.13:1, was 12.5px at 4.25:1. */
 .top-sub {
   margin: 0;
-  max-width: 76ch;
-  font-size: 12.5px;
-  line-height: 1.5;
+  max-width: 62ch;
+  font-size: var(--fs-base);
+  line-height: var(--lh-prose);
   color: var(--text-2);
 }
 
 .receipt {
-  margin: 2px 0 0;
-  max-width: 100ch;
-  font-size: 12px;
-  line-height: 1.55;
+  margin: 0;
+  max-width: var(--measure);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
   color: var(--text-3);
 }
 
+/* The instrument rail: four inputs on one line, bounded above and below by a
+   rule. No fill, no border box, no floating right. */
 .controls-group {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  margin-left: auto;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--s7);
+  row-gap: var(--s3);
+  align-items: end;
+  margin: var(--s5) 0 0;
+  padding: var(--s3) 0 var(--s4);
+  border-top: 1px solid var(--rule-2);
+  border-bottom: 1px solid var(--rule-2);
 }
 
 .controls-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-
-.controls-note {
-  margin: 0;
-  max-width: 64ch;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--text-3);
+  grid-column: 1 / -1;
+  grid-row: 1;
 }
 
 .controls {
+  grid-column: 1;
+  grid-row: 2;
   display: flex;
-  gap: 18px;
   align-items: flex-end;
+  gap: var(--s6);
   flex-wrap: wrap;
-  margin-left: 0;
+  margin: 0;
 }
-
-/* ----------------------------------------------------------- deadline band */
 
 /*
- * The two dates the whole ranking turns on. They used to be reachable only by
- * reading a dropdown option and a caveat at the foot of the page.
+ * The sentence saying the page is a function of these four inputs. It is not
+ * deleted and it is not demoted to a footnote - removing it while the output
+ * grows to 56px is how an estimate is made to look measured. It is moved onto
+ * the rail it describes, right-aligned on the same line as the controls, so it
+ * costs no vertical space and stops being a fifth prose block.
  */
-.band {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 40px;
-  padding: 13px 18px;
-  margin-bottom: 18px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--policy);
-  border-radius: var(--r);
-}
-
-.band .band-label {
-  flex-basis: 100%;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+.controls-note {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  align-self: center;
+  text-align: right;
+  max-width: 34ch;
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
   color: var(--text-3);
-}
-
-.band .band-row {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 13px;
-}
-
-.band .band-row .k {
-  color: var(--text-2);
-}
-
-.band .band-row .d {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.band .band-row .r {
-  color: var(--text-3);
-  font-size: 12.5px;
-}
-
-.band .band-source {
-  flex-basis: 100%;
-  margin: 2px 0 0;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-3);
-  max-width: 110ch;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--s2);
+  min-width: 0;
 }
 
-.field-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
+/* ---------------------------------------------------------------- controls */
 
-/* One control shape, drawn by us. The platform's own select chrome on a dark
-   surface looks like a dialog someone left open. */
+/*
+ * Underlined, not boxed. The old fill-plus-border was 1.20:1 against its own
+ * fill and 1.34:1 against the page, so the four ranking inputs had no
+ * perceptible edge at all - which is most of why the header read as things
+ * adrift in a gap. A rule at 3.47:1 is a boundary you can see and is the only
+ * chrome a control needs.
+ */
 select,
-.stepper {
-  height: 32px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+.stepper,
+.signin input {
+  height: 30px;
+  padding: 0;
+  background-color: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--edge); /* 3.47:1 on --bg - WCAG 1.4.11 */
+  border-radius: 0;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-base);
+  font-weight: 500;
 }
 
 select {
   appearance: none;
   -webkit-appearance: none;
-  padding: 0 30px 0 10px;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%239aa5b4' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 10px 6px;
-  cursor: pointer;
+  padding-right: 22px;
   max-width: 300px;
   text-overflow: ellipsis;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%23a7b2c2' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0 center;
+  background-size: 10px 6px;
 }
 
 select:hover,
-.stepper:hover {
-  border-color: #2e3644;
-  background-color: var(--surface-3);
+.stepper:hover,
+.signin input:hover {
+  border-bottom-color: var(--text-2);
+  background-color: transparent;
 }
 
 select:focus-visible,
 .stepper:focus-within,
+.signin input:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 3px;
+  border-radius: 1px;
 }
 
-/* The stepper. The native spinner is drawn by the platform, lives in a
-   four-pixel hit area, and is the one control on the page that looks like it
-   belongs to a different application. */
+/* The native spinner is drawn by the platform, lives in a four-pixel hit area,
+   and is the one control on the page that looks like a different application. */
 .stepper {
   display: inline-flex;
   align-items: center;
-  padding: 0 3px 0 10px;
-  gap: 6px;
+  gap: var(--s2);
 }
 
 .stepper input {
-  width: 24px;
+  width: 26px;
   border: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-base);
+  font-weight: 500;
   padding: 0;
   text-align: right;
   -moz-appearance: textfield;
@@ -293,18 +432,18 @@ button:focus-visible {
 
 .stepper .unit {
   color: var(--text-3);
-  font-size: 12.5px;
+  font-size: var(--fs-meta);
 }
 
 .stepper .arrows {
   display: flex;
   flex-direction: column;
-  margin-left: 3px;
+  margin-left: 2px;
 }
 
 .stepper .arrows button {
-  height: 13px;
-  width: 20px;
+  height: 12px;
+  width: 18px;
   padding: 0;
   display: grid;
   place-items: center;
@@ -312,7 +451,7 @@ button:focus-visible {
   border: 0;
   cursor: pointer;
   color: var(--text-3);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   -webkit-appearance: none;
   appearance: none;
 }
@@ -333,241 +472,657 @@ button:focus-visible {
   stroke-linejoin: round;
 }
 
-/* ---------------------------------------------------------------- headline */
+/* ----------------------------------------------------------- the readout */
 
 /*
- * A verdict, not a scoreboard. The numeral is inline inside the sentence it
- * belongs to, because standing alone in its own column it was a number with no
- * noun and the page opened on something nobody could read.
+ * The verdict and the deadlines it is measured against, side by side on one
+ * row at different widths. They were two stacked full-width slabs wearing the
+ * identical costume - surface, 1px border, 3px left stripe - which is what a
+ * reference table and a computed conclusion look like when layout is asked to
+ * say nothing and colour is asked to arbitrate.
+ */
+.readout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr);
+  column-gap: var(--s7);
+  align-items: start;
+  margin-bottom: var(--s6);
+}
+
+.readout:not(:has(.band)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ---------------------------------------------------------------- verdict */
+
+/*
+ * The numeral leaves the sentence and hangs in the left margin, on the
+ * verdict's first baseline. It was a 34px glyph set inline inside a 16.5px
+ * line box at line-height 1.4 - 1.47x its own leading, which is why it read as
+ * a mistake rather than as a figure. The box is gone; one rule opens the
+ * block, and it is coloured only when something is actually overdue.
  */
 .headline {
+  grid-column: 1;
   display: block;
-  padding: 20px 24px;
-  margin-bottom: 24px;
-  background: linear-gradient(180deg, var(--surface) 0%, #0e1116 100%);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--line);
-  border-radius: var(--r);
+  padding: var(--s5) 0 0;
+  margin: 0;
+  background: none;
+  border: 0;
+  border-top: 2px solid var(--rule-2);
+  border-radius: 0;
 }
 
 .headline.late {
-  border-left-color: var(--overdue);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--s5);
+  align-items: baseline;
+  border-top-color: var(--overdue);
+}
+
+.headline.late > .big {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.headline.late > .verdict,
+.headline.late > .defines,
+.headline.late > .excluded {
+  grid-column: 2;
 }
 
 .headline .big {
-  display: inline;
-  font-size: 34px;
-  font-weight: 620;
-  letter-spacing: -0.03em;
-  margin-right: 4px;
-  color: var(--overdue);
+  display: block;
+  margin: 0;
+  font-size: var(--fs-display);
+  font-weight: 600;
+  line-height: 0.82;
+  letter-spacing: var(--ls-display);
+  color: var(--overdue); /* 7.01:1 on --bg - AA normal, AAA large */
 }
 
 .headline .verdict {
   margin: 0;
-  font-size: 16.5px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  color: var(--text);
-  line-height: 1.4;
-  max-width: 76ch;
+  max-width: 30ch; /* forces two lines, so the figure hangs beside a block
+                      rather than beside a strip */
+  font-size: var(--fs-lead);
+  font-weight: 400;
+  line-height: 1.24;
+  letter-spacing: var(--ls-lead);
+  color: var(--text); /* 16.52:1 */
+  text-wrap: balance;
+}
+
+/*
+ * The two sentences defining "confirmed" and "overdue" are demoted to a footer
+ * strip under a hairline rather than deleted. They are the terms the numerator
+ * is made of, and hiding them inside a collapsed disclosure while enlarging
+ * the numeral to 56px is how an estimate gets made to look measured.
+ */
+.headline .defines,
+.headline .excluded {
+  max-width: var(--measure);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-prose);
 }
 
 .headline .defines {
-  margin: 8px 0 0;
-  color: var(--text-2);
-  font-size: 13px;
-  line-height: 1.6;
-  max-width: 86ch;
+  margin: var(--s5) 0 0;
+  padding-top: var(--s3);
+  border-top: 1px solid var(--rule);
+  color: var(--text-2); /* 9.13:1 */
 }
 
 .headline .excluded {
-  margin: 6px 0 0;
-  color: var(--text-3);
-  font-size: 12.5px;
-  line-height: 1.6;
-  max-width: 86ch;
+  margin: var(--s2) 0 0;
+  color: var(--text-3); /* 6.54:1 */
 }
 
-/* ------------------------------------------------------- what to do next */
+/* ---------------------------------------------------------- deadline band */
 
-.next {
-  margin-bottom: 24px;
-}
-
-.next h2 {
+/*
+ * A reference table, so it is set as one: two dated rows divided by hairlines,
+ * each carrying the deadline, the time left, and how many confirmed items are
+ * already past it. That last figure is computed per track and over confirmed
+ * rows only, because the product's whole argument is that these are two
+ * different deadlines and one pooled count re-merges what the two tracks exist
+ * to separate.
+ */
+.band {
+  grid-column: 2;
+  display: block;
+  padding: var(--s5) 0 0 var(--s6);
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
+  background: none;
+  border: 0;
+  border-top: 2px solid var(--rule-2);
+  border-left: 1px solid var(--rule-2);
+  border-radius: 0;
 }
 
-.next .sub {
-  margin: 5px 0 12px;
-  font-size: 12.5px;
-  line-height: 1.6;
+.band .band-label {
+  display: block;
+  margin-bottom: var(--s3);
+}
+
+.band .band-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--s4);
+  row-gap: 5px;
+  align-items: baseline;
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.band .band-row .k {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.band .band-row .d {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  font-size: var(--fs-head);
+  font-weight: 600;
+  line-height: var(--lh-flat);
+  letter-spacing: var(--ls-head);
+  color: var(--policy); /* 10.39:1 on --bg. Amber is the policy colour and
+                           this is the policy datum, not a decoration. */
+}
+
+.band .band-row .r {
+  grid-column: 1;
+  grid-row: 2;
+  font-size: var(--fs-meta);
   color: var(--text-3);
-  max-width: 86ch;
+}
+
+.band .band-row .n {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+
+.band .band-row .n.late {
+  color: var(--overdue); /* 7.01:1 */
+}
+
+.band .band-source {
+  margin: var(--s4) 0 0;
+  max-width: var(--measure); /* was 110ch at 12px - roughly 800px of unbroken
+                                grey set as a single paragraph */
+  font-size: var(--fs-meta);
+  line-height: var(--lh-prose);
+  color: var(--text-3);
+}
+
+/* ------------------------------------------------------ what to do next */
+
+/*
+ * Was three full-width slabs. Now a four-column ledger - label, count, and the
+ * clause underneath - the same shape as the worklist rows below it, so the
+ * page has one table idiom instead of two container idioms.
+ */
+.next {
+  margin: 0 0 var(--s6);
 }
 
 .next .groups {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: block;
+  margin-top: var(--s4);
+  border-top: 1px solid var(--rule);
 }
 
 .next button {
-  display: block;
-  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 128px;
+  column-gap: var(--col-gap);
+  row-gap: 3px;
+  /* A button's width:auto is fit-content, not fill: without this the count
+     column lands a third of the way across the page instead of on the rail. */
+  width: calc(100% + var(--bleed) * 2);
+  margin: 0 calc(var(--bleed) * -1);
+  padding: 11px var(--bleed) 12px;
   text-align: left;
-  padding: 11px 14px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
   color: var(--text);
   font: inherit;
   cursor: pointer;
+  transition: background 90ms ease;
 }
 
 .next button:hover {
-  background: var(--surface-2);
+  background: var(--surface);
 }
 
 .next button[aria-pressed='true'] {
-  box-shadow: inset 2px 0 0 var(--accent);
   background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.next button .cc {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: var(--lh-data);
+  color: var(--text);
 }
 
 .next button .n {
-  color: var(--overdue);
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+  text-align: right;
+  font-size: var(--fs-base);
   font-weight: 600;
-  margin-left: 8px;
+  line-height: var(--lh-data);
+  color: var(--overdue);
 }
 
 .next .clause {
+  grid-column: 1 / -1;
+  grid-row: 2;
   display: block;
-  margin-top: 3px;
-  font-size: 12.5px;
-  line-height: 1.55;
+  margin: 0;
+  max-width: var(--measure);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
   color: var(--text-3);
 }
 
 .next .filter-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 10px;
+  gap: var(--s3);
+  margin-top: var(--s3);
 }
 
 .next .filter-note {
-  font-size: 12.5px;
+  font-size: var(--fs-meta);
   color: var(--text-3);
 }
 
-/* --------------------------------------------------------------- tracks head */
+/* ------------------------------------------------------------ tracks head */
 
 .tracks-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 10px;
-}
-
-.tracks-caption {
-  margin: 0;
-  max-width: 86ch;
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--text-3);
+  justify-content: flex-end;
+  gap: var(--s5);
+  padding-top: var(--s4);
+  margin-bottom: var(--s5);
+  border-top: 1px solid var(--rule-2);
 }
 
 .tracks-head .export {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  align-items: center;
+  gap: var(--s3);
 }
 
 .export-note {
-  font-size: 11.5px;
-  color: var(--text-3);
+  max-width: 42ch;
   text-align: right;
-  max-width: 40ch;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--text-3);
 }
 
-.ghost:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* ---------------------------------------------------------------- tracks */
 
-/* ------------------------------------------------------------------ tracks */
-
+/*
+ * Two columns of a newspaper, divided by one vertical hairline in the gutter.
+ * The rule is set at --edge rather than at a decorative weight because I2 -
+ * two tracks, never pooled - is the invariant the whole architecture exists to
+ * protect, and a division you cannot see does not protect it.
+ */
 .tracks {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  column-gap: var(--s7);
   align-items: start;
 }
 
-@media (max-width: 1180px) {
-  .tracks {
-    grid-template-columns: 1fr;
-  }
-}
-
 .track {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
+  position: relative;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  min-width: 0;
 }
 
+.tracks > .track + .track::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--s7) / -2);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--edge); /* 3.47:1 */
+}
+
+/*
+ * The heading now outranks its own rows, and takes the page's one remaining
+ * fill so that two ranked lists of the same row shape are unmistakably two
+ * headed objects. It was 14.5px/620 over 15px/600 row names - a container
+ * outranked by its own contents.
+ */
 .track > h2 {
-  margin: 0;
-  padding: 14px 18px 12px;
-  font-size: 14.5px;
-  font-weight: 620;
-  letter-spacing: -0.005em;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-2);
+  margin: 0 calc(var(--bleed) * -1);
+  padding: var(--s3) var(--bleed);
+  background: var(--surface);
+  border: 0;
+  border-bottom: 1px solid var(--edge);
 }
 
 .track > h2 .kicker {
   display: block;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  margin-bottom: 4px;
+  margin-bottom: var(--s2);
 }
 
 .track > h2 .count {
+  margin-left: 10px;
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  letter-spacing: 0;
   color: var(--text-3);
-  font-weight: 500;
-  font-size: 13px;
-  margin-left: 7px;
 }
 
 .track > h2 small {
   display: block;
-  color: var(--text-3);
+  margin-top: var(--s2);
+  max-width: 54ch;
+  font-size: var(--fs-meta);
   font-weight: 400;
-  font-size: 12.5px;
-  margin-top: 4px;
+  line-height: var(--lh-prose);
   letter-spacing: 0;
+  color: var(--text-3);
 }
 
-/* --------------------------------------------------------------------- row */
+/* ------------------------------------------------------------ shared axis */
+
+/*
+ * Drawn once per list, on the same full-width box every package chart uses, so
+ * a tick and a bar at the same year land on the same pixel with no shared
+ * tokens to keep in lockstep. Both tracks are scaled to one horizon computed
+ * across every row on the page, so a longer bar always means more time -
+ * previously each row recomputed its own horizon and the column was decoration.
+ */
+.axis {
+  padding: var(--s4) 0 0;
+}
+
+.axis-title {
+  display: block;
+  margin-bottom: var(--s2);
+}
+
+.axis-scale {
+  position: relative;
+  height: 15px;
+  border-bottom: 1px solid var(--edge);
+}
+
+.axis .tick {
+  position: absolute;
+  bottom: 4px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: var(--fs-eyebrow);
+  font-weight: 600;
+  line-height: var(--lh-flat);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-3); /* 6.54:1 */
+}
+
+.axis .tick::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 1px;
+  height: 4px;
+  background: var(--edge);
+}
+
+.axis .tick.start {
+  transform: none;
+}
+
+.axis .tick.start::after {
+  left: 0;
+}
+
+.axis .tick.end {
+  transform: translateX(-100%);
+}
+
+.axis .tick.end::after {
+  left: 100%;
+}
+
+.axis .tick.binding {
+  color: var(--overdue); /* 7.01:1 */
+}
+
+/* ----------------------------------------------------------- work package */
+
+/*
+ * The organising unit. Slack, lateness, the binding deadline and the bar are
+ * pure functions of (track, control class), so every row in a package carried
+ * an identical date, an identical verdict and an identical chart. Said once at
+ * the head of the package, in full width, they are an argument; said twenty
+ * times in a 250px column they were the uniform grey the complaint is about.
+ *
+ * Packages are emitted by run, in the order the ranking produced, so the list
+ * is still strictly slack-ascending and the bars still descend down the page.
+ */
+.pkg {
+  padding: var(--s5) 0 var(--s2);
+  border-top: 1px solid var(--rule-2);
+}
+
+.pkg:first-of-type {
+  border-top: 0;
+  padding-top: var(--s4);
+}
+
+.pkg-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--s5);
+  align-items: start;
+}
+
+.pkg-id {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.pkg-kind {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.pkg-name {
+  display: inline;
+  margin: 0;
+  font-size: var(--fs-head);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: var(--ls-head);
+  color: var(--text); /* 16.52:1 */
+}
+
+.pkg-n {
+  margin-left: 10px;
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.pkg-when {
+  grid-column: 2;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/*
+ * Both states of the verdict now sit in one contrast tier. "In Time" was
+ * 3.79:1 against "Overdue" at 6.24:1 - two tiers apart, so the not-late state
+ * read as an empty column rather than as a verdict.
+ */
+.pkg-when .chip {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.pkg-when .chip.late {
+  color: var(--overdue);
+}
+
+.pkg-when .when {
+  display: block;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: var(--lh-data);
+  color: var(--text-2);
+}
+
+.pkg-when .when.late {
+  color: var(--overdue);
+}
+
+/* --------------------------------------------------------------- the chart */
+
+/*
+ * CSS percentages, not SVG. The bar and the rule that judges it are positioned
+ * from the same percentage of the same box, so they cannot drift at any
+ * container width and no column token has to be kept in lockstep with another.
+ * The old SVG was meet-scaled inside a wider slot and sat visibly off its own
+ * column.
+ */
+.chart {
+  position: relative;
+  height: 22px;
+  margin-top: var(--s4);
+}
+
+.chart::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--rule-2); /* the empty part of the axis carries no value,
+                                so it is a hairline, not a filled track */
+}
+
+/* Y: the replacement itself. */
+.bar-work {
+  position: absolute;
+  left: 0;
+  bottom: 1px;
+  height: 10px;
+  min-width: 2px;
+  background: var(--bar-ok); /* 4.48:1 on --bg */
+}
+
+/* X: how long the data stays sensitive after that. A second term, so a thinner
+   bar of the same solidity - hatching would put it back under the 3:1 floor
+   the old fills were drawn below. Zero on the authenticity track. */
+.bar-tail {
+  position: absolute;
+  bottom: 1px;
+  height: 4px;
+  background: var(--bar-tail); /* 3.58:1 on --bg */
+}
+
+/*
+ * The overshoot: the part of the binding total that lies past the binding
+ * rule. Colouring the whole work bar red was wrong on a CRQC-bound
+ * confidentiality row, where lateness is X + Y crossing the dashed rule - so
+ * the red mark was the segment that cleared its rule and the grey tail was the
+ * one that crossed it. This colours the segment that actually crosses, and
+ * draws it 4px taller than the bar it sits on, so the overshoot protrudes and
+ * lateness is carried by geometry as well as by hue.
+ */
+.bar-over {
+  position: absolute;
+  bottom: 1px;
+  height: 14px;
+  min-width: 2px;
+  background: var(--bar-late); /* 4.54:1 on --bg */
+}
+
+.rule {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--edge); /* 3.47:1 - the constraint that does not bind */
+}
+
+.rule[data-kind='crqc'] {
+  background: repeating-linear-gradient(to bottom, var(--edge) 0 3px, transparent 3px 7px);
+}
+
+.rule[data-strong] {
+  width: 2px;
+  background: var(--overdue); /* 7.01:1 - the constraint that binds */
+}
+
+.rule[data-kind='crqc'][data-strong] {
+  background: repeating-linear-gradient(to bottom, var(--overdue) 0 3px, transparent 3px 7px);
+}
+
+/* --------------------------------------------------------------------- rows */
+
+/*
+ * One continuous rail beside the package, coloured by its verdict. It replaces
+ * a per-row chip and a per-row rail, both of which said the same constant
+ * thing once per row.
+ */
+.pkg-rows {
+  position: relative;
+  margin-top: var(--s4);
+}
+
+.pkg-rows::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--bleed) * -1);
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--bar-ok);
+}
+
+.pkg[data-late] .pkg-rows::before {
+  background: var(--overdue);
+}
 
 .row {
-  border-bottom: 1px solid var(--line-soft);
-  padding: 13px 18px;
-  cursor: pointer;
   display: grid;
-  grid-template-columns: 84px 1fr 216px 12px;
-  gap: 18px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) var(--conf-w) var(--chev-w);
+  column-gap: var(--col-gap);
+  align-items: baseline;
+  margin: 0 calc(var(--bleed) * -1);
+  padding: 9px var(--bleed);
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
   transition: background 90ms ease;
 }
 
@@ -576,63 +1131,40 @@ button:focus-visible {
 }
 
 .row:hover {
-  background: var(--surface-2);
+  background: var(--surface);
 }
 
 .row[aria-expanded='true'] {
   background: var(--surface-2);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/*
- * Always says something. It used to be transparent when the row was not late,
- * so the column read as empty rather than as a verdict of "in time".
- */
-.row .slack {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  text-align: right;
-  color: var(--text-3);
-  padding-top: 4px;
+.row .id {
+  grid-column: 1;
+  min-width: 0;
 }
 
-.row .slack .chip {
-  display: inline-block;
-}
-
-.row .slack .chip.late {
-  color: var(--overdue);
-}
-
-.row .chev {
-  color: var(--text-3);
-  font-size: 11px;
-  padding-top: 3px;
-}
-
-.row:hover .chev {
-  color: var(--text-2);
-}
-
+/* Identity carried by size, weight and contrast at once, rather than by a size
+   identical to the heading above it. */
 .row .name {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 600;
-  letter-spacing: -0.008em;
+  line-height: var(--lh-data);
+  letter-spacing: 0;
+  color: var(--text); /* 16.52:1 */
+  overflow-wrap: anywhere;
 }
 
 .row .name .dim {
-  color: var(--text-3);
+  font-size: var(--fs-meta);
   font-weight: 400;
-  font-size: 13px;
+  color: var(--text-3);
 }
 
 .row .meta {
-  color: var(--text-3);
-  font-size: 12.5px;
   margin-top: 4px;
-  line-height: 1.45;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--text-3); /* 6.54:1 on --bg, 6.16:1 on hover */
 }
 
 .row .meta strong {
@@ -648,84 +1180,72 @@ button:focus-visible {
   color: var(--policy);
 }
 
-.row .whenwrap {
+/*
+ * The one figure that varies row to row gets the page's only numeric column.
+ * It is the per-modality confidence ceiling, which COMPETITIVE.md 4.1 calls
+ * the moat, and it was previously visible only after a click. Banded to the
+ * nearest five points, because whole-percent rounding implies 1% resolution on
+ * a noisy-OR estimate.
+ */
+.row .conf {
+  grid-column: 2;
   text-align: right;
-  padding-top: 1px;
+  font-size: var(--fs-meta);
+  color: var(--text-2); /* 9.13:1 */
 }
 
-.row .when {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.row .when.late {
-  color: var(--overdue);
-  font-weight: 600;
-}
-
-.row .driver {
+.row .chev {
+  grid-column: 3;
+  font-size: var(--fs-eyebrow);
   color: var(--text-3);
-  font-size: 11px;
-  margin-top: 3px;
-  margin-bottom: 7px;
-  letter-spacing: 0.02em;
+  text-align: right;
 }
 
-.timeline {
-  width: 100%;
-  max-width: 216px;
-  height: 20px;
-  display: block;
-  margin-left: auto;
+.row:hover .chev {
+  color: var(--text);
 }
 
-@media (max-width: 760px) {
-  .row {
-    grid-template-columns: 84px 1fr 12px;
-  }
-
-  .row .whenwrap {
-    grid-column: 2;
-    text-align: left;
-  }
-
-  .timeline {
-    margin-left: 0;
-  }
+.empty {
+  padding: var(--s5) 0;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
 }
 
 /* ------------------------------------------------------------------- panel */
 
+/*
+ * The expanded derivation. No fill of its own: it is tied to the row above it
+ * by an accent rail and indented onto it.
+ */
 .panel {
-  padding: 4px 18px 20px;
-  background: #0d1015;
-  border-bottom: 1px solid var(--line);
+  margin: 0 calc(var(--bleed) * -1);
+  padding: var(--s2) var(--bleed) var(--s5) 10px;
+  background: none;
+  border: 0;
+  border-left: 2px solid var(--accent);
+  border-bottom: 1px solid var(--rule);
 }
 
 .panel section {
-  padding: 16px 0 0;
-  border-top: 1px solid var(--line-soft);
+  padding: var(--s4) 0 0;
+  border-top: 1px solid var(--rule);
 }
 
 .panel section:first-child {
   border-top: 0;
-  padding-top: 14px;
+  padding-top: var(--s3);
 }
 
 .panel h3 {
-  margin: 0 0 9px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  color: var(--text-3);
-  text-transform: uppercase;
+  margin: 0 0 var(--s2);
 }
 
 .panel .prose {
-  margin: 0 0 7px;
-  max-width: 92ch;
-  line-height: 1.62;
-  color: var(--text-2);
+  margin: 0 0 var(--s2);
+  max-width: var(--measure);
+  font-size: var(--fs-base);
+  line-height: var(--lh-prose);
+  color: var(--text-2); /* 9.13:1 */
 }
 
 .panel .prose:last-of-type {
@@ -734,7 +1254,7 @@ button:focus-visible {
 
 .panel .prose.dim {
   color: var(--text-3);
-  font-size: 12.5px;
+  font-size: var(--fs-meta);
 }
 
 .panel .prose.warn {
@@ -743,18 +1263,20 @@ button:focus-visible {
 
 .panel .prose.path {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
   color: var(--text-3);
+  overflow-wrap: anywhere;
 }
 
 .panel details {
-  margin-top: 10px;
+  margin-top: var(--s3);
 }
 
 .panel details summary {
   cursor: pointer;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--fs-meta);
   list-style: none;
   display: inline-flex;
   align-items: center;
@@ -779,21 +1301,24 @@ button:focus-visible {
 }
 
 .panel details > .tree {
-  margin-top: 10px;
+  margin-top: var(--s3);
 }
 
 .tree {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.65;
+}
+
+.tree .node {
+  padding-right: var(--s3);
+  overflow-wrap: anywhere;
 }
 
 .tree .kind {
   display: inline-block;
-  width: 82px;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
+  width: 88px;
+  letter-spacing: 0.07em;
 }
 
 .tree .kind.ASSUMPTION {
@@ -812,67 +1337,123 @@ button:focus-visible {
   color: var(--accent);
 }
 
+/* -------------------------------------------------- confidence breakdown */
+
+/*
+ * The one thing COMPETITIVE.md 4.1 calls the moat. It was a four-column table
+ * whose payload was the string "Already counted". The ceiling is now drawn as
+ * a length - but as a cap, not as a contribution: a modality that was already
+ * counted gets the same ceiling drawn hollow, because it added nothing. A
+ * dimmed solid bar there would read as "contributed a little", which is the
+ * one place on this page where a picture could lie about the arithmetic.
+ */
 table.sure {
+  width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
-  margin: 12px 0 2px;
+  margin: var(--s3) 0 var(--s1);
+  font-size: var(--fs-meta);
 }
 
 table.sure td {
-  padding: 4px 18px 4px 0;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 6px var(--s4) 6px 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+  color: var(--text-3);
+}
+
+table.sure td:first-child {
+  width: 34%;
 }
 
 table.sure td.num {
-  color: var(--text-3);
+  text-align: right;
+  width: 6.5rem;
+}
+
+table.sure td.ceil {
+  position: relative;
+  width: 34%;
+  min-width: 130px;
+  padding-right: 0;
+}
+
+table.sure td.ceil span {
+  display: block;
+  padding-bottom: 7px;
+}
+
+/* --w is the served ceiling as a percentage. */
+table.sure td.ceil::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 6px;
+  height: 4px;
+  width: var(--w, 0%);
+  background: var(--text-2); /* 9.13:1 - neutral, because confidence is not
+                                severity and stays out of red and amber */
+}
+
+table.sure tr.counted td {
+  color: var(--text-2);
+}
+
+table.sure tr.counted td:first-child {
+  color: var(--text);
+  font-weight: 600;
 }
 
 table.sure tr.ignored td {
   color: var(--text-3);
 }
 
-table.sure tr.counted td:first-child {
-  color: var(--text);
+/* Hollow: the same cap, and nothing counted under it. */
+table.sure tr.ignored td.ceil::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--edge); /* 3.47:1 */
 }
 
 table.evidence {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: var(--fs-meta);
 }
 
 table.evidence td {
-  padding: 4px 18px 4px 0;
+  padding: 5px var(--s4) 5px 0;
   vertical-align: top;
-  border-bottom: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--rule);
+  color: var(--text-2);
 }
 
 table.evidence td.mod {
   color: var(--text-3);
   white-space: nowrap;
+  width: 12rem;
 }
 
 table.evidence td.loc {
-  color: var(--text-2);
   font-family: var(--mono);
-  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 
 /* ------------------------------------------------------------------- notes */
 
 .aside {
+  margin-top: var(--s5);
+  max-width: var(--measure);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-prose);
   color: var(--text-3);
-  font-size: 12.5px;
-  margin-top: 20px;
-  line-height: 1.6;
 }
 
 .caveat {
+  margin-top: var(--s3);
+  max-width: var(--measure);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-prose);
   color: var(--text-3);
-  font-size: 12.5px;
-  margin-top: 10px;
-  max-width: 100ch;
-  line-height: 1.6;
 }
 
 .caveat.warn {
@@ -885,14 +1466,22 @@ table.evidence td.loc {
   font-weight: 600;
 }
 
+/* A caveat that is a problem rather than a note. */
+.caveat-warn {
+  color: var(--policy);
+  border-left: 2px solid var(--policy);
+  padding-left: var(--s3);
+}
+
 .notes {
-  margin-top: 20px;
+  margin-top: var(--s5);
+  padding: var(--s4) 0 0;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+  font-size: var(--fs-meta);
   color: var(--text-3);
-  font-size: 12.5px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: 11px 16px;
-  background: var(--surface);
 }
 
 .notes summary {
@@ -904,9 +1493,9 @@ table.evidence td.loc {
 }
 
 .notes p {
-  margin: 11px 0 0;
-  max-width: 96ch;
-  line-height: 1.6;
+  margin: var(--s3) 0 0;
+  max-width: var(--measure);
+  line-height: var(--lh-prose);
 }
 
 .notes strong {
@@ -914,71 +1503,17 @@ table.evidence td.loc {
   font-weight: 600;
 }
 
-.empty {
-  padding: 22px 18px;
-  color: var(--text-3);
-}
-
-/* --------------------------------------------------------------- sign in */
-
-.signin {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-  max-width: 560px;
-}
-
-.signin input {
-  height: 32px;
-  min-width: 320px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  padding: 0 10px;
-}
-
-.signin button {
-  height: 32px;
-  padding: 0 16px;
-  background: var(--surface-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.signin button:hover {
-  border-color: #2e3644;
-}
-
-.signin .caveat {
-  flex-basis: 100%;
-  margin-top: 4px;
-}
-
-/* Header title row: the product name and the way back out of a session. */
-.top-title {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
+/* ----------------------------------------------------------------- buttons */
 
 .ghost {
   background: transparent;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge); /* was 1.34:1, now 3.47:1 on --bg */
   color: var(--text-2);
-  padding: 6px 12px;
+  padding: 7px 13px;
   border-radius: var(--r-sm);
-  font: 500 12px/1 var(--sans);
-  letter-spacing: 0.02em;
+  font: 600 var(--fs-eyebrow) / var(--lh-flat) var(--sans);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
   cursor: pointer;
   transition:
     color 120ms ease,
@@ -988,84 +1523,123 @@ table.evidence td.loc {
 
 .ghost:hover {
   color: var(--text);
-  border-color: var(--text-3);
-  background: var(--surface-2);
+  border-color: var(--text-2);
+  background: var(--surface);
 }
 
-/* A caveat that is a problem rather than a note. */
-.caveat-warn {
-  color: var(--policy);
-  border-left: 2px solid var(--policy);
-  padding-left: 10px;
+.ghost:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
+
+/* ----------------------------------------------------------------- sign in */
+
+.signin {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  max-width: 560px;
+}
+
+.signin input {
+  min-width: 320px;
+}
+
+.signin button {
+  height: 30px;
+  padding: 0 var(--s4);
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: 600 var(--fs-meta) / var(--lh-flat) var(--sans);
+  cursor: pointer;
+}
+
+.signin button:hover {
+  border-color: var(--text-2);
+  background: var(--surface);
+}
+
+.signin .caveat {
+  flex-basis: 100%;
+  margin-top: var(--s1);
+}
+
+/* ---------------------------------------------------------------- coverage */
 
 /*
- * Coverage. The one panel on this page that reports absence, so it is laid out
- * to be read top-down as a list of gaps: the misses come first and carry the
- * only colour, and the examined rows sit under them in plain type.
+ * The one panel that reports absence, so it is laid out to be read top-down as
+ * a list of gaps: the misses come first and carry the only colour.
  */
 .coverage {
-  margin-top: 32px;
-  padding-top: 24px;
-  border-top: 1px solid var(--line);
+  margin-top: var(--s7);
+  padding-top: 0;
+  border-top: 0;
 }
 
 .coverage-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--s4);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--rule-2);
 }
 
-.coverage h2 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+.coverage-head h2 {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .coverage-count {
-  font: 400 12px/1 var(--mono);
+  font-size: var(--fs-meta);
   color: var(--text-3);
 }
 
 .coverage-sub {
-  margin: 8px 0 0;
-  max-width: 78ch;
-  font-size: 12.5px;
-  line-height: 1.6;
+  margin: var(--s2) 0 0;
+  max-width: var(--measure);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-prose);
   color: var(--text-3);
 }
 
 .coverage-statement {
-  margin: 10px 0 16px;
+  margin: var(--s3) 0 var(--s5);
+  max-width: var(--measure);
+  font-size: var(--fs-base);
+  line-height: var(--lh-prose);
   color: var(--text-2);
-  max-width: 68ch;
 }
 
 .coverage-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--fs-meta);
 }
 
 .coverage-table th,
 .coverage-table td {
   text-align: left;
-  padding: 9px 12px 9px 0;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 10px var(--s4) 10px 0;
+  border-bottom: 1px solid var(--rule);
   vertical-align: baseline;
   font-weight: 400;
 }
 
 .coverage-table th {
+  width: 17rem;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: var(--lh-data);
   color: var(--text);
-  width: 15rem;
 }
 
 .coverage-table .verdict {
-  width: 8rem;
-  font: 400 12px/1.4 var(--mono);
+  width: 9rem;
+  font-size: var(--fs-meta);
   color: var(--policy);
 }
 
@@ -1075,12 +1649,11 @@ table.evidence td.loc {
 
 .coverage-table .detail {
   color: var(--text-3);
+  line-height: var(--lh-meta);
 }
 
-/*
- * Remedies and caveats are written to read as clauses in the CLI, where they
- * follow a dash. In a table cell they stand alone, so they get a capital.
- */
+/* Remedies are written to read as clauses after a dash in the CLI. In a table
+   cell they stand alone, so they get a capital. */
 .coverage-table .detail::first-letter {
   text-transform: capitalize;
 }
@@ -1090,20 +1663,128 @@ table.evidence td.loc {
 }
 
 .coverage .notes ul {
-  margin: 8px 0 0;
-  padding-left: 18px;
+  margin: var(--s2) 0 0;
+  padding-left: var(--s4);
   color: var(--text-2);
 }
 
 .coverage .notes li {
-  margin-bottom: 6px;
+  margin-bottom: 5px;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-prose);
 }
 
-@media (max-width: 720px) {
-  .coverage-table th {
-    width: auto;
+/* -------------------------------------------------------------- responsive */
+
+@media (max-width: 980px) {
+  .controls-group {
+    grid-template-columns: minmax(0, 1fr);
   }
+
+  .controls-note {
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: start;
+    text-align: left;
+  }
+}
+
+@media (max-width: 1180px) {
+  .readout {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0;
+  }
+
+  .headline,
+  .band {
+    grid-column: 1;
+  }
+
+  .band {
+    padding: var(--s5) 0 0;
+    border-left: 0;
+  }
+}
+
+/* One track at a time. The old breakpoint was 1180px, well past the point
+   where a name column, a chart and a date stop fitting side by side. */
+@media (max-width: 1360px) {
+  .tracks {
+    grid-template-columns: 1fr;
+    row-gap: var(--s7);
+  }
+
+  .tracks > .track + .track::before {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  header.top {
+    column-gap: var(--s4);
+  }
+
+  .headline.late {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--s3);
+  }
+
+  .headline.late > .big,
+  .headline.late > .verdict,
+  .headline.late > .defines,
+  .headline.late > .excluded {
+    grid-column: 1;
+  }
+
+  .headline .verdict {
+    max-width: none;
+  }
+
+  .pkg-head {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--s3);
+  }
+
+  .pkg-when {
+    grid-column: 1;
+    text-align: left;
+  }
+
+  .next button {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .row {
+    grid-template-columns: minmax(0, 1fr) var(--chev-w);
+    align-items: start;
+  }
+
+  .row .conf {
+    grid-column: 1;
+    grid-row: 2;
+    text-align: left;
+    margin-top: 2px;
+  }
+
+  .row .chev {
+    grid-row: 1;
+  }
+
+  .coverage-table th,
   .coverage-table .verdict {
     width: auto;
+  }
+
+  table.sure td:first-child,
+  table.sure td.ceil,
+  table.sure td.num {
+    width: auto;
+  }
+}
+
+/* The marks are read, not watched. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
   }
 }

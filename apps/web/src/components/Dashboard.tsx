@@ -81,6 +81,7 @@ function Stepper({
 /** Sentinel for the estate view: every system at once, correlated by traces. */
 const ESTATE = ESTATE_SCAN;
 import { Worklist } from './Worklist';
+import { domainYears } from './Timeline';
 
 /**
  * The screen nobody else builds.
@@ -99,12 +100,23 @@ import { Worklist } from './Worklist';
  * screen, so they sit above the findings, with the authority that imposes them
  * printed underneath rather than three screens away.
  */
-function DeadlineBand({ pack, currentYear }: { pack: PolicyPack; currentYear: number }) {
-  const rows: { k: string; year: number }[] = [];
+function DeadlineBand({
+  pack,
+  currentYear,
+  counts,
+}: {
+  pack: PolicyPack;
+  currentYear: number;
+  /** Confirmed rows and confirmed-overdue rows, per track. Never pooled. */
+  counts: Record<Track, { confirmed: number; late: number }>;
+}) {
+  const rows: { k: string; year: number; track: Track }[] = [];
   const c = pack.regulatoryDeadlines.CONFIDENTIALITY;
   const a = pack.regulatoryDeadlines.AUTHENTICITY;
-  if (typeof c === 'number') rows.push({ k: 'Key Exchange And Encryption', year: c });
-  if (typeof a === 'number') rows.push({ k: 'Signatures And Certificates', year: a });
+  if (typeof c === 'number')
+    rows.push({ k: 'Key Exchange And Encryption', year: c, track: 'CONFIDENTIALITY' });
+  if (typeof a === 'number')
+    rows.push({ k: 'Signatures And Certificates', year: a, track: 'AUTHENTICITY' });
 
   return (
     <div className="band">
@@ -121,6 +133,13 @@ function DeadlineBand({ pack, currentYear }: { pack: PolicyPack; currentYear: nu
               <span className="k">{r.k}</span>
               <span className="d">{Math.floor(r.year) - 1}-12-31</span>
               <span className="r">{remaining(r.year, currentYear)}</span>
+              {/* Counted per track and over confirmed rows only. One pooled
+                  figure here would re-merge exactly what the two tracks exist
+                  to keep apart, and would disagree with the numerator beside
+                  it, which counts confirmed rows too. */}
+              <span className={`n ${counts[r.track].late > 0 ? 'late' : ''}`}>
+                {counts[r.track].late} of {counts[r.track].confirmed} confirmed overdue
+              </span>
             </span>
           ))}
           {pack.regulatoryAuthority !== null && (
@@ -153,6 +172,14 @@ function remaining(deadlineYear: number, currentYear: number): string {
     months === 0 ? '' : `${months} month${months === 1 ? '' : 's'}`,
   ].filter((x) => x !== '');
   return `${parts.join(', ')}${total < 0 ? ' past' : ' left'}`;
+}
+
+type Track = RankedFinding['track'];
+
+/** Confirmed, and confirmed-and-overdue, for one track. */
+function tally(rs: readonly RankedFinding[]): { confirmed: number; late: number } {
+  const confirmed = rs.filter((f) => f.assertionLevel === 'CONFIRMED');
+  return { confirmed: confirmed.length, late: confirmed.filter((f) => f.late).length };
 }
 
 /** Everything this scan turned up, across all four buckets the endpoint returns. */
@@ -340,6 +367,20 @@ export function Dashboard({
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [rows]);
 
+  /**
+   * One x-axis for the whole page. The two worklists sit side by side, so
+   * per-track domains would stand two differently scaled rulers next to each
+   * other and invite exactly the comparison they cannot support.
+   */
+  const domain = useMemo(() => domainYears(rows), [rows]);
+  const trackCounts = useMemo(
+    () => ({
+      CONFIDENTIALITY: tally(worklists?.confidentiality ?? []),
+      AUTHENTICITY: tally(worklists?.authenticity ?? []),
+    }),
+    [worklists],
+  );
+
   const selectedScan = scans.find((s) => s.id === scanId) ?? null;
 
   async function exportTickets() {
@@ -465,52 +506,55 @@ export function Dashboard({
 
       {worklists !== null && (
         <>
-          {activePack !== null && (
-            <DeadlineBand pack={activePack} currentYear={worklists.currentYear} />
-          )}
-
-          {/* The old headline was a bare numeral with no noun beside it, over a
-              paragraph that explained the product rather than the number. Both
-              terms of the sentence are defined underneath, because "confirmed"
-              and "overdue" are the two words the whole page turns on. */}
-          <div className={`headline ${worklists.headline.numerator > 0 ? 'late' : ''}`}>
-            <p className="verdict">
-              {worklists.headline.denominator === 0 ? (
-                'Nothing on these worklists is confirmed yet.'
-              ) : worklists.headline.numerator === 0 ? (
-                `None of the ${worklists.headline.denominator} confirmed uses of breakable cryptography are overdue yet.`
-              ) : (
-                <>
-                  <span className="big">{worklists.headline.numerator}</span> of{' '}
-                  {worklists.headline.denominator} confirmed uses of breakable cryptography are
-                  already overdue for replacement.
-                </>
+          {/* One instrument cluster: the computed conclusion on the left, the
+              reference table it is measured against on the right. They were two
+              stacked full-width slabs wearing the identical costume, which is
+              what a verdict and a lookup table look like when layout is asked
+              to say nothing and colour is left to arbitrate. */}
+          <div className="readout">
+            {/* The numeral is lifted out of the sentence so it can hang in the
+                margin. Set inline at 34px inside a 16.5px line box it was 1.47x
+                its own leading and could only read as a mistake. */}
+            <div className={`headline ${worklists.headline.numerator > 0 ? 'late' : ''}`}>
+              {worklists.headline.denominator > 0 && worklists.headline.numerator > 0 && (
+                <span className="big">{worklists.headline.numerator}</span>
               )}
-            </p>
-            {worklists.headline.denominator > 0 && (
-              <p className="defines">
-                Confirmed means the evidence carries no assumption in it and clears the confidence
-                bar. Overdue means starting today does not finish the replacement before the date
-                that binds it, and on the key exchange list the secrecy lifetime is part of that
-                date.
+              <p className="verdict">
+                {worklists.headline.denominator === 0
+                  ? 'Nothing on these worklists is confirmed yet.'
+                  : worklists.headline.numerator === 0
+                    ? `None of the ${worklists.headline.denominator} confirmed uses of breakable cryptography are overdue yet.`
+                    : `of ${worklists.headline.denominator} confirmed uses of breakable cryptography are already overdue for replacement.`}
               </p>
-            )}
-            {observedOnly > 0 && (
-              <p className="excluded">
-                {observedOnly} further row{observedOnly === 1 ? ' is' : 's are'} listed below as
-                observed, not confirmed. They are not counted here, because that evidence is not
-                certain enough to commit to.
-              </p>
+              {worklists.headline.denominator > 0 && (
+                <p className="defines">
+                  Confirmed means the evidence carries no assumption in it and clears the confidence
+                  bar. Overdue means starting today does not finish the replacement before the date
+                  that binds it, and on the key exchange list the secrecy lifetime is part of that
+                  date.
+                </p>
+              )}
+              {observedOnly > 0 && (
+                <p className="excluded">
+                  {observedOnly} further row{observedOnly === 1 ? ' is' : 's are'} listed below as
+                  observed, not confirmed. They are not counted here, because that evidence is not
+                  certain enough to commit to.
+                </p>
+              )}
+            </div>
+
+            {activePack !== null && (
+              <DeadlineBand
+                pack={activePack}
+                currentYear={worklists.currentYear}
+                counts={trackCounts}
+              />
             )}
           </div>
 
           {overdueByControl.length > 0 && (
             <section className="next">
               <h2>What To Do Next</h2>
-              <p className="sub">
-                Grouped by who has to make the change. That is what sets how long it takes, and how
-                long it takes is what sets the date.
-              </p>
               <div className="groups">
                 {overdueByControl.map(([cc, n]) => {
                   const y = activePack?.migrationYearsByControl[cc];
@@ -521,7 +565,7 @@ export function Dashboard({
                       aria-pressed={controlFilter === cc}
                       onClick={() => setControlFilter(controlFilter === cc ? null : cc)}
                     >
-                      {CONTROL[cc] ?? cc}
+                      <span className="cc">{CONTROL[cc] ?? cc}</span>
                       <span className="n">{n} overdue</span>
                       <span className="clause">
                         {y === undefined ? '' : `${duration(y)} to replace under this pack. `}
@@ -546,10 +590,6 @@ export function Dashboard({
           )}
 
           <div className="tracks-head">
-            <p className="tracks-caption">
-              Every row opens. Inside is the arithmetic behind its date, how sure we are and why,
-              and every piece of evidence that was counted.
-            </p>
             <div className="export">
               <button
                 type="button"
@@ -585,6 +625,7 @@ export function Dashboard({
               showSystem={estate !== null}
               crqcYear={activePack?.crqcYear ?? null}
               compareTitle={comparePackTitle}
+              domain={domain}
             />
             <Worklist
               kicker="Authenticity Track"
@@ -598,6 +639,7 @@ export function Dashboard({
               showSystem={estate !== null}
               crqcYear={activePack?.crqcYear ?? null}
               compareTitle={comparePackTitle}
+              domain={domain}
             />
           </div>
 
