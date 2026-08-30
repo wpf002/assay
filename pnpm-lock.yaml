@@ -84,6 +84,9 @@ importers:
       '@assay/detect-deps':
         specifier: workspace:*
         version: link:../../packages/detect-deps
+      '@assay/detect-host':
+        specifier: workspace:*
+        version: link:../../packages/detect-host
       '@assay/detect-kms':
         specifier: workspace:*
         version: link:../../packages/detect-kms
@@ -203,6 +206,15 @@ importers:
       yaml:
         specifier: ^2.5.1
         version: 2.9.0
+
+  packages/detect-host:
+    dependencies:
+      '@assay/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
 
   packages/detect-kms:
     dependencies:

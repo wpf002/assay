@@ -122,11 +122,12 @@ export const CLASSES: readonly ClassDefinition[] = [
   },
   {
     id: 'HOSTS',
-    capability: 'UNBUILT',
+    capability: 'READY',
     label: 'Servers and endpoints',
     modalities: ['HOST_AGENT'],
-    remedy: 'nothing ships for this yet: host and EDR ingest is the next detector to build',
-    caveat: 'nothing in a source scan speaks for a host that has no repository',
+    remedy: 'export from osquery, Ansible or your EDR and pass `--hosts <file>`',
+    caveat:
+      'a host agent reads the file the daemon loaded, which is stronger than a repository copy and still short of an observed handshake',
   },
   {
     id: 'APPLIANCES',

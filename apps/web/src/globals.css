@@ -274,9 +274,11 @@ header.top h1,
 
 /* The sentence that answers "what is this" is now the brightest thing in the
    header rather than the third dimmest: 15px at 9.13:1, was 12.5px at 4.25:1. */
+/* No measure cap. A 62ch limit broke both of these into two and three ragged
+   lines with the rest of the header empty beside them; at the top of the page
+   there is nothing to read them against, so the full width is the right one. */
 .top-sub {
   margin: 0;
-  max-width: 62ch;
   font-size: var(--fs-base);
   line-height: var(--lh-prose);
   color: var(--text-2);
@@ -284,7 +286,6 @@ header.top h1,
 
 .receipt {
   margin: 0;
-  max-width: var(--measure);
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
   color: var(--text-3);
@@ -332,9 +333,12 @@ header.top h1,
   grid-column: 2;
   grid-row: 2;
   justify-self: end;
-  align-self: center;
+  /* On the controls' own baseline, at the end of the row, rather than parked on
+     a line of its own underneath them. */
+  align-self: end;
+  padding-bottom: 6px;
   text-align: right;
-  max-width: 34ch;
+  white-space: nowrap;
   margin: 0;
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
@@ -699,6 +703,10 @@ button:focus-visible {
   transition: background 90ms ease;
 }
 
+.next button:last-of-type {
+  border-bottom: 0;
+}
+
 .next button:hover {
   background: var(--surface);
 }
@@ -729,11 +737,10 @@ button:focus-visible {
 }
 
 .next .clause {
-  grid-column: 1 / -1;
+  grid-column: 1;
   grid-row: 2;
   display: block;
   margin: 0;
-  max-width: var(--measure);
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
   color: var(--text-3);
@@ -755,7 +762,7 @@ button:focus-visible {
 
 .tracks-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: var(--s5);
   padding-top: var(--s4);
@@ -769,11 +776,12 @@ button:focus-visible {
   gap: var(--s3);
 }
 
+/* Baseline with the button beside it, on one line. Stacked and ragged-right it
+   read as a caption that had come loose from its control. */
 .export-note {
-  max-width: 42ch;
-  text-align: right;
+  white-space: nowrap;
   font-size: var(--fs-meta);
-  line-height: var(--lh-meta);
+  line-height: var(--lh-flat);
   color: var(--text-3);
 }
 
@@ -785,27 +793,28 @@ button:focus-visible {
  * two tracks, never pooled - is the invariant the whole architecture exists to
  * protect, and a division you cannot see does not protect it.
  */
+/*
+ * The two lists run one under the other, each the full width.
+ *
+ * Side by side, the shorter list left several hundred pixels of nothing beside
+ * the longer one, and no amount of stretching fixes that: it is inherent to two
+ * columns of different lengths. They are still never merged - I2 keeps the
+ * confidentiality and authenticity tracks apart, and they remain two sections
+ * with their own headings, their own axes and their own totals - but sequential
+ * rather than parallel. The width goes into the rows, which needed it.
+ */
 .tracks {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  column-gap: var(--s7);
-  /* Stretch, not start. The two lists are never the same length - 26 items
-     against 22 - and aligning to the top left the shorter column's rule
-     stopping halfway down, with a large unexplained void beneath it. */
-  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s7);
 }
 
-/* Closes the ragged bottom edge, so the section ends on a line rather than on
-   whichever list happened to be longer. */
-.tracks::after {
-  content: '';
-  grid-column: 1 / -1;
-  margin-top: var(--s5);
-  border-top: 1px solid var(--rule);
+.track + .track {
+  padding-top: var(--s6);
+  border-top: 1px solid var(--rule-2);
 }
 
 .track > .track-end {
-  margin-top: auto;
   padding-top: var(--s4);
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
@@ -814,8 +823,6 @@ button:focus-visible {
 
 .track {
   position: relative;
-  display: flex;
-  flex-direction: column;
   background: none;
   border: 0;
   border-radius: 0;
@@ -863,7 +870,6 @@ button:focus-visible {
 .track > h2 small {
   display: block;
   margin-top: var(--s2);
-  max-width: 54ch;
   font-size: var(--fs-meta);
   font-weight: 400;
   line-height: var(--lh-prose);
@@ -884,9 +890,11 @@ button:focus-visible {
   padding: var(--s4) 0 0;
 }
 
+/* Sits directly on the scale it labels. A full step of air between them read
+   as two unrelated things rather than as a heading and its ruler. */
 .axis-title {
   display: block;
-  margin-bottom: var(--s2);
+  margin-bottom: var(--s1);
 }
 
 .axis-scale {
@@ -1138,8 +1146,10 @@ button:focus-visible {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--conf-w) var(--chev-w);
-  column-gap: var(--col-gap);
+  grid-template-columns:
+    minmax(0, 34ch) minmax(0, 16ch) minmax(0, 1fr)
+    var(--conf-w) var(--chev-w);
+  column-gap: var(--s5);
   align-items: baseline;
   margin: 0 calc(var(--bleed) * -1);
   padding: 9px var(--bleed);
@@ -1160,8 +1170,30 @@ button:focus-visible {
   background: var(--surface-2);
 }
 
-.row .id {
+/* Each cell is its own column now that a track runs the full page width. */
+.row .name {
   grid-column: 1;
+  min-width: 0;
+  /* One line. An asset name broken across two lines stops looking like a name
+     and starts looking like two rows. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row .sys {
+  grid-column: 2;
+  min-width: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .meta {
+  grid-column: 3;
   min-width: 0;
 }
 
@@ -1183,7 +1215,6 @@ button:focus-visible {
 }
 
 .row .meta {
-  margin-top: 4px;
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
   color: var(--text-3); /* 6.54:1 on --bg, 6.16:1 on hover */
@@ -1210,14 +1241,14 @@ button:focus-visible {
  * a noisy-OR estimate.
  */
 .row .conf {
-  grid-column: 2;
+  grid-column: 4;
   text-align: right;
   font-size: var(--fs-meta);
   color: var(--text-2); /* 9.13:1 */
 }
 
 .row .chev {
-  grid-column: 3;
+  grid-column: 5;
   font-size: var(--fs-eyebrow);
   color: var(--text-3);
   text-align: right;
@@ -1488,11 +1519,14 @@ table.evidence td.loc {
   font-weight: 600;
 }
 
-/* A caveat that is a problem rather than a note. */
+/* A caveat that is a problem rather than a note. One line: it is a short
+   sentence, and wrapping it into a three-line block in the left third of the
+   page made it look like a paragraph nobody finished. */
 .caveat-warn {
   color: var(--policy);
   border-left: 2px solid var(--policy);
   padding-left: var(--s3);
+  max-width: none;
 }
 
 /*
@@ -1707,7 +1741,6 @@ table.evidence td.loc {
 
 .coverage-sub {
   margin: var(--s2) 0 0;
-  max-width: var(--measure);
   font-size: var(--fs-meta);
   line-height: var(--lh-prose);
   color: var(--text-3);
@@ -1734,6 +1767,12 @@ table.evidence td.loc {
   border-bottom: 1px solid var(--rule);
   vertical-align: baseline;
   font-weight: 400;
+}
+
+/* The last row's rule and the section rule beneath it drew as a double line. */
+.coverage-table tr:last-child th,
+.coverage-table tr:last-child td {
+  border-bottom: 0;
 }
 
 .coverage-table th {
@@ -1793,6 +1832,7 @@ table.evidence td.loc {
     grid-row: 3;
     justify-self: start;
     text-align: left;
+    white-space: normal;
   }
 }
 

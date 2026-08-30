@@ -60,6 +60,7 @@ program
   .option('--policy <pack>', 'policy pack recorded with the scan', DEFAULT_PACK_ID)
   .option('--system <id>', 'system identifier (defaults to the directory name)')
   .option('--include-dev', 'include devDependencies')
+  .option('--hosts <file>', 'host or EDR export: what the machines are actually running')
   .option('--key-inventory <file>', 'normalized cloud KMS / HSM key export to fold in')
   .option('--no-binaries', 'skip binary analysis')
   .option('--traces <file>', 'OTLP export or trace bundle: reaches across the network edge')

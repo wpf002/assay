@@ -220,29 +220,34 @@ function Row({
   return (
     <>
       <div className="row" role="button" aria-expanded={open} onClick={onToggle}>
-        <div className="id">
-          <div className="name">
-            {assetLabel(f)}
-            <span className="dim"> · {PURPOSE[f.purpose] ?? f.purpose}</span>
-          </div>
-
-          <div className="meta">
-            {showSystem && <strong>{f.systemId}</strong>}
-            {showSystem && ' · '}
-            <span className="act">{WHERE[f.reachedVia] ?? f.reachedVia}</span>
-            {f.assertionLevel !== 'CONFIRMED' && <> · Observed, not confirmed</>}
-            {moved !== undefined && (
-              <span className="moved">
-                {' '}
-                · was {Math.abs(moved.before).toFixed(1)} years{' '}
-                {moved.before < 0 ? 'late' : 'to spare'}
-                {compareTitle === null ? ' under the other pack' : ` under ${compareTitle}`}
-              </span>
-            )}
-          </div>
+        {/* Real columns rather than two stacked lines. Each track now runs the
+            full page width, and a name floating beside a percentage with a
+            thousand pixels of nothing between them is not a list, it is a gap. */}
+        <div className="name">
+          {assetLabel(f)}
+          <span className="dim"> · {PURPOSE[f.purpose] ?? f.purpose}</span>
         </div>
 
-        <div className="conf">{sure}% sure</div>
+        <div className="sys">{showSystem ? f.systemId : ''}</div>
+
+        <div className="meta">
+          <span className="act">{WHERE[f.reachedVia] ?? f.reachedVia}</span>
+          {f.assertionLevel !== 'CONFIRMED' && <> · Observed, not confirmed</>}
+          {moved !== undefined && (
+            <span className="moved">
+              {' '}
+              · was {Math.abs(moved.before).toFixed(1)} years{' '}
+              {moved.before < 0 ? 'late' : 'to spare'}
+              {compareTitle === null ? ' under the other pack' : ` under ${compareTitle}`}
+            </span>
+          )}
+        </div>
+
+        {/* The column heading is the label. Repeating "sure" on every row is
+            forty words that say the same thing forty times. */}
+        <div className="conf" title={`${sure}% confidence in this finding`}>
+          {sure}%
+        </div>
 
         <div className="chev" aria-hidden="true">
           {open ? '▾' : '▸'}

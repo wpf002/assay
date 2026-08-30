@@ -4,6 +4,7 @@ import { scanSource } from '@assay/detect-source';
 import { scanDependencies } from '@assay/detect-deps';
 import { scanCertificates } from '@assay/detect-pki';
 import { importInventory, kmsFindings } from '@assay/detect-kms';
+import { hostFindings, importHosts } from '@assay/detect-host';
 import { scanBinaries } from '@assay/detect-binary';
 import { loadPack } from '@assay/policy';
 import { loadTraces } from './traces.js';
@@ -28,6 +29,11 @@ export interface PushOptions {
   readonly keyInventory?: string;
   /** Binary analysis is on by default; vendor blobs are where the surprises live. */
   readonly binaries?: boolean;
+  /**
+   * A host or EDR export. The only modality that says what a machine is
+   * actually running, rather than what a repository proposes.
+   */
+  readonly hosts?: string;
   /** OTLP export or normalized bundle. Reaches across the network edge. */
   readonly traces?: string;
   readonly now?: string;
@@ -63,6 +69,31 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
     const inventory = await importInventory(options.keyInventory);
     findings.push(...kmsFindings(inventory, { systemId: systemName, collectedAt }).findings);
   }
+  let hostsSeen = 0;
+  if (options.hosts !== undefined) {
+    const all = await importHosts(options.hosts);
+    // A fleet export spans the estate; this push is one system. Taking the
+    // whole file would file another team's hosts under this scan, and the
+    // estate view keys on the scan's system, so the provenance would be wrong
+    // in a way nothing downstream could detect.
+    const mine = all.hosts.filter((h) => h.systemId === '' || h.systemId === systemName);
+    const skipped = all.hosts.length - mine.length;
+    if (skipped > 0) {
+      process.stderr.write(
+        `  ${skipped} host(s) in that export belong to other systems and were left for their own scan\n`,
+      );
+    }
+    const inventory = { ...all, hosts: mine };
+    const result = hostFindings(inventory, { systemId: systemName, collectedAt });
+    findings.push(...result.findings);
+    hostsSeen = result.hostsSeen;
+    for (const note of result.notes) {
+      // A library too old to negotiate post-quantum is a blocker no config
+      // change works around, and it is not a finding, so it has to be said out
+      // loud or it is said nowhere.
+      process.stderr.write(`  blocker: ${note.host}: ${note.why}\n`);
+    }
+  }
 
   const assembled = assemble(findings);
   const reach = analyzeReachability(assembled.occurrences, source.graph);
@@ -83,6 +114,7 @@ export async function runPush(path: string, options: PushOptions): Promise<void>
       'detect-pki',
       ...(binary.filesScanned > 0 ? ['detect-binary'] : []),
       ...(options.keyInventory ? ['detect-kms'] : []),
+      ...(hostsSeen > 0 ? ['detect-host'] : []),
     ],
     policyPackId: pack.packId,
     policyPackVersion: pack.packVersion,

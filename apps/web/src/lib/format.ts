@@ -34,7 +34,7 @@ export function assetLabel(f: RankedFinding): string {
   if (primitive === 'DH' && params['ephemeral'] === 'true') return 'DHE';
   if (primitive === 'ECDH' && params['ephemeral'] === 'true') return 'ECDHE';
   if (mode === 'KEY_TRANSPORT') {
-    return padding === undefined ? `${primitive} key transport` : `${primitive} key transport ${padding}`;
+    return padding === undefined ? `${primitive} Key Transport` : `${primitive} Key Transport ${padding}`;
   }
   // Nobody writes "EdDSA-Ed25519"; the curve is the name people use.
   if (primitive === 'EdDSA' && curve !== undefined) return curve;
@@ -52,12 +52,12 @@ export function assetLabel(f: RankedFinding): string {
 }
 
 export const PURPOSE: Readonly<Record<string, string>> = {
-  KEY_ESTABLISHMENT: 'Key exchange',
+  KEY_ESTABLISHMENT: 'Key Exchange',
   DATA_ENCRYPTION: 'Encryption',
   DIGITAL_SIGNATURE: 'Signing',
   CERTIFICATE_AUTH: 'Certificates',
   INTEGRITY: 'Hashing',
-  KEY_DERIVATION: 'Key derivation',
+  KEY_DERIVATION: 'Key Derivation',
   RANDOMNESS: 'Randomness',
 };
 
@@ -71,16 +71,16 @@ export const CONTROL: Readonly<Record<string, string>> = {
 };
 
 export const WHERE: Readonly<Record<string, string>> = {
-  OBSERVED: 'Seen on the wire',
-  ENTRY_POINT: 'In a live code path',
-  DEPLOYED_CONFIG: 'In deployed config',
-  LIBRARY_SURFACE: 'On a public API surface',
-  TRACE: 'Called by another service',
+  OBSERVED: 'Seen On The Wire',
+  ENTRY_POINT: 'In A Live Code Path',
+  DEPLOYED_CONFIG: 'In Deployed Config',
+  LIBRARY_SURFACE: 'On A Public API Surface',
+  TRACE: 'Called By Another Service',
   // Both of these were the empty string, so the row silently dropped the
   // fragment and a reader could not tell "nothing reached it" from "nobody
   // looked". Those are different claims and the second one is ours to own.
-  UNANALYZED: 'Reachability not analyzed',
-  NONE: 'No call site to follow',
+  UNANALYZED: 'Reachability Not Analyzed',
+  NONE: 'No Call Site To Follow',
 };
 
 /**

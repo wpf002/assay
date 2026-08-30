@@ -495,7 +495,7 @@ export function Dashboard({
             </Field>
           </div>
           <p className="controls-note">
-            Every number below is computed from these. Change one and the whole page is recomputed.
+            Every number below is computed from these. Change one and the page recomputes.
           </p>
         </div>
       </header>
@@ -655,8 +655,8 @@ export function Dashboard({
           {coverageError !== null && <p className="aside">{coverageError}</p>}
           {coverage !== null && coverage.unscanned.length > 0 && (
             <p className="caveat caveat-warn">
-              <strong>Never scanned:</strong> {coverage.unscanned.join(', ')}. These services
-              appear in live traffic and have no inventory of any kind.
+              <strong>Never scanned:</strong> {coverage.unscanned.join(', ')}. Seen in live
+              traffic, with no inventory of any kind.
             </p>
           )}
 
@@ -665,7 +665,7 @@ export function Dashboard({
           {/* Four unrelated notes that used to stack down the left margin with
               the right half of the screen empty. One band, in columns. */}
           <div className="footnotes">
-            <details className="notes">
+            <details className="notes" open>
               <summary>
                 Not Counted Above ({worklists.unreached.length} unreachable,{' '}
                 {worklists.hints.length} library hints)

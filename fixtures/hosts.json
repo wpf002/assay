@@ -1,0 +1,37 @@
+{
+  "collectedAt": "2026-08-30T00:00:00.000Z",
+  "source": "osquery 5.12",
+  "hosts": [
+    {
+      "hostId": "i-0ab12", "hostname": "payments-web-01", "os": "RHEL 9.4", "systemId": "payments-api",
+      "packages": [
+        { "name": "openssl", "version": "3.0.7", "source": "rpm" },
+        { "name": "openssh", "version": "8.7p1", "source": "rpm" }
+      ],
+      "configs": [
+        { "path": "/etc/ssh/sshd_config", "directive": "Ciphers", "value": "aes128-cbc,3des-cbc,aes256-gcm@openssh.com", "active": true },
+        { "path": "/etc/ssh/sshd_config", "directive": "KexAlgorithms", "value": "diffie-hellman-group14-sha1,curve25519-sha256", "active": true },
+        { "path": "/etc/ssh/sshd_config", "directive": "MACs", "value": "hmac-sha1,hmac-sha2-256", "active": true },
+        { "path": "/etc/nginx/nginx.conf", "directive": "ssl_ciphers", "value": "ECDHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-SHA:!aNULL", "active": true }
+      ],
+      "keyFiles": [
+        { "path": "/etc/pki/tls/certs/payments.crt", "kind": "certificate", "algorithm": "sha256WithRSAEncryption", "bits": 2048, "subject": "CN=payments.example.com", "notAfter": "2027-03-01" },
+        { "path": "/etc/ssh/ssh_host_rsa_key.pub", "kind": "ssh-host-key", "algorithm": "ssh-rsa", "bits": 2048 }
+      ],
+      "listeners": [
+        { "port": 443, "protocol": "tcp", "service": "nginx", "offers": ["ECDHE-RSA-AES128-GCM-SHA256", "DHE-RSA-AES256-SHA"] }
+      ]
+    },
+    {
+      "hostId": "i-0cd34", "hostname": "treasury-db-01", "os": "Ubuntu 22.04", "systemId": "treasury",
+      "packages": [{ "name": "openssl", "version": "3.5.1", "source": "deb" }],
+      "configs": [
+        { "path": "/etc/ssh/sshd_config", "directive": "Ciphers", "value": "aes256-gcm@openssh.com", "active": true }
+      ],
+      "keyFiles": [
+        { "path": "/var/lib/postgresql/server.crt", "kind": "certificate", "algorithm": "ecdsa-with-SHA256", "curve": "prime256v1" }
+      ],
+      "listeners": []
+    }
+  ]
+}

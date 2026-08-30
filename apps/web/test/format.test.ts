@@ -42,9 +42,9 @@ describe('assetLabel', () => {
 
   it('keeps the padding that distinguishes two key-transport rows', () => {
     expect(label('RSA(mode=KEY_TRANSPORT,padding=RSA_PKCS1_OAEP_PADDING)')).toBe(
-      'RSA key transport RSA_PKCS1_OAEP_PADDING',
+      'RSA Key Transport RSA_PKCS1_OAEP_PADDING',
     );
-    expect(label('RSA(mode=KEY_TRANSPORT)')).toBe('RSA key transport');
+    expect(label('RSA(mode=KEY_TRANSPORT)')).toBe('RSA Key Transport');
   });
 
   it('still prefers the named curve and the established spellings', () => {

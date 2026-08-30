@@ -26,6 +26,7 @@
     "@assay/detect-binary": "workspace:*",
     "@assay/attest": "workspace:*",
     "zod": "^3.23.8",
-    "@assay/coverage": "workspace:*"
+    "@assay/coverage": "workspace:*",
+    "@assay/detect-host": "workspace:*"
   }
 }

@@ -82,8 +82,7 @@ export function Coverage({ scanId }: { scanId: string }) {
       {report.blindSpots.length > 0 && (
         <p className="caveat caveat-warn">
           <strong>No inventory at all:</strong> {report.blindSpots.map((b) => b.name).join(', ')}.
-          Observed in live traffic with nothing scanned. Scanning your own repositories will not
-          close this.
+          Seen in live traffic, never scanned.
         </p>
       )}
 
@@ -148,7 +147,7 @@ export function Coverage({ scanId }: { scanId: string }) {
         </tbody>
       </table>
 
-      <details className="notes">
+      <details className="notes" open>
         <summary>What This Does Not Claim</summary>
         <ul>
           {report.notAsserted.map((n) => (
